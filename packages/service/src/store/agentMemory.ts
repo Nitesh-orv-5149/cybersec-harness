@@ -246,7 +246,6 @@ export async function ensureAgentMemory(db: Db) {
     // (runId, seq) unique: the same step can never be recorded twice.
     db.collection('agent_events').createIndex({ runId: 1, seq: 1 }, { unique: true }),
     db.collection('agent_events').createIndex({ projectId: 1, type: 1, status: 1, at: -1 }),
-    db.collection('agent_events').createIndex({ projectId: 1, 'refs.findingId': 1, at: -1 }),
     db.collection('agent_memories').createIndex({ projectId: 1, status: 1, 'subject.key': 1 }),
     db.collection('agent_memories').createIndex({ content: 'text' }),
     // Optional short-lived memories: MongoDB deletes a document once its expiresAt has passed.

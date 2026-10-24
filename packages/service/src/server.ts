@@ -1,6 +1,5 @@
 // Local HTTP + WebSocket API. Binds to loopback only and rejects cross-site requests.
 import { sha256 } from './util.js';
-import { registerAgentRoutes } from './agentMemory.js';
 import { validateFindingReview, validateRequirementInput, validateVerificationInput } from './store/schemas.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +14,7 @@ import { GraphIndex, impactOf } from './analyzer/query.js';
 import { graphFindings } from './findings.js';
 import { browserAvailable } from './browser.js';
 import { log } from './log.js';
+import { registerAgentRoutes } from './agentMemory.js';
 
 export class Service {
   readonly store: Store;
@@ -69,8 +69,6 @@ export class Service {
 
     const h = (fn: (req: Request, res: Response) => Promise<unknown> | unknown) =>
       (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res)).then((v) => { if (!res.headersSent) res.json(v ?? { ok: true }); }).catch(next);
-
-    registerAgentRoutes(app, h, this.store, (req) => this.session(req).id);
 
     app.get('/api/health', h(() => ({
       ok: true, mongo: { available: this.store.available, error: this.store.lastError }, browser: browserAvailable(),
@@ -182,6 +180,8 @@ export class Service {
       await this.store.col('verification_records').insertOne(doc as never);
       return doc;
     }));
+
+    registerAgentRoutes(app, h, this.store, (req) => this.session(req).id);
 
     // ---- dependency vulnerability scanning (external tools; never downloaded or installed by the service) ----
     app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));

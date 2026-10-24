@@ -9,9 +9,10 @@ export class StoreUnavailableError extends Error {
 }
 
 export const COLLECTIONS = [
-  'projects', 'file_events', 'source_snapshots', 'graph_snapshots', 'analysis_runs','agent_runs', 'agent_events', 'agent_memories',
-  'graph_findings','agent_requirements','graph_nodes','graph_edges' ,'browser_runs', 'browser_results', 'comparisons', 'verification_records',
+  'projects', 'file_events', 'source_snapshots', 'graph_snapshots', 'analysis_runs',
+  'graph_findings', 'browser_runs', 'browser_results', 'comparisons', 'verification_records',
   'security_scan_runs', 'security_observations',
+  'agent_requirements', 'agent_runs', 'agent_events', 'agent_memories', 'graph_nodes', 'graph_edges',
 ] as const;
 export type CollectionName = (typeof COLLECTIONS)[number];
 
@@ -123,6 +124,11 @@ export class Store {
       db.collection('comparisons').createIndex({ projectId: 1, createdAt: -1 }),
       db.collection('comparisons').createIndex({ browserRunId: 1 }, { unique: true }),
       db.collection('verification_records').createIndex({ projectId: 1, findingId: 1, at: -1 }),
+      db.collection('graph_nodes').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
+      db.collection('graph_nodes').createIndex({ projectId: 1, nodeId: 1 }),
+      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
+      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, source: 1 }),
+      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, target: 1 }),
       db.collection('graph_findings').createIndex({ projectId: 1, source: 1, 'pkg.name': 1, 'pkg.version': 1 }),
       db.collection('graph_findings').createIndex({ projectId: 1, ids: 1 }),
       db.collection('security_scan_runs').createIndex({ projectId: 1, category: 1, startedAt: -1 }),
@@ -130,11 +136,6 @@ export class Store {
       db.collection('security_observations').createIndex({ projectId: 1, findingId: 1, observedAt: -1 }),
       db.collection('security_observations').createIndex({ runId: 1, tool: 1 }),
       db.collection('security_observations').createIndex({ projectId: 1, 'package.name': 1, advisoryId: 1 }),
-      db.collection('graph_nodes').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
-      db.collection('graph_nodes').createIndex({ projectId: 1, nodeId: 1 }),
-      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
-      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, source: 1 }),
-      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, target: 1 }),
     ]);
   }
 
