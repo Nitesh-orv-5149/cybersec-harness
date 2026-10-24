@@ -5,21 +5,34 @@ import requests
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 MODEL = "qwen3:4b-instruct-2507-q8_0"
 
-TOOL_MENU = """Available tools:
-- auth_probe: requests an endpoint with no auth header, flags if it still succeeds
+# Endpoint probes run locally against the running sample-app; dependency scanners are the real
+# tools the harness service runs against the project's lockfile and persists.
+ENDPOINT_TOOLS = {"auth_probe", "sqli_probe", "secret_scan"}
+DEPENDENCY_TOOLS = {"osv-api", "npm-audit", "osv-scanner", "trivy"}
+
+TOOL_MENU = """Endpoint probes (run against the changed HTTP endpoint):
+- auth_probe: requests the endpoint with no auth header, flags if it still succeeds
 - sqli_probe: sends a quote-breaking payload into a path param, flags a server crash
 - secret_scan: greps source for hardcoded-secret-shaped strings
+
+Dependency vulnerability scanners (run against the project's package-lock.json):
+- osv-api: queries the OSV.dev advisory database for known-vulnerable package versions
+- npm-audit: runs `npm audit` against the registry's advisory endpoint
+- osv-scanner: runs the OSV-Scanner binary over the lockfile
+- trivy: runs Trivy's vulnerability scanner over the dependency tree
 """
 
 
-def choose_tools(endpoint: dict) -> list[str]:
-    """Ask the model which of the 3 tools are worth running against this changed endpoint.
-    Falls back to running all three if the model is unreachable or answers oddly."""
+def choose_tools(endpoint: dict, available: list[str]) -> list[str]:
+    """Ask the model which of the currently-available tools are worth running for this change.
+    `available` is the set the orchestrator can actually run right now (ready scanners + probes).
+    Falls back to running everything available if the model is unreachable or answers oddly."""
     prompt = (
         f"{TOOL_MENU}\n"
         f"A code change was just detected affecting this endpoint: {endpoint['method']} {endpoint['path']}.\n"
-        'Reply with ONLY a JSON array of tool names to run, e.g. ["auth_probe", "sqli_probe"]. '
-        "Pick every tool that could plausibly apply; do not explain."
+        f"Only these tools are available right now: {available}.\n"
+        'Reply with ONLY a JSON array of tool names to run, e.g. ["auth_probe", "osv-api"]. '
+        "Pick every available tool that could plausibly apply; do not explain."
     )
     try:
         res = requests.post(
@@ -30,9 +43,8 @@ def choose_tools(endpoint: dict) -> list[str]:
         res.raise_for_status()
         content = res.json()["message"]["content"]
         names = json.loads(content[content.index("["): content.rindex("]") + 1])
-        valid = {"auth_probe", "sqli_probe", "secret_scan"}
-        chosen = [n for n in names if n in valid]
-        return chosen or list(valid)
+        chosen = [n for n in names if n in available]
+        return chosen or list(available)
     except (requests.RequestException, KeyError, ValueError, json.JSONDecodeError) as e:
-        print(f"[llm] could not get a decision ({e}), running all tools")
-        return ["auth_probe", "sqli_probe", "secret_scan"]
+        print(f"[llm] could not get a decision ({e}), running all available tools")
+        return list(available)

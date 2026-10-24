@@ -143,7 +143,11 @@ export class Service {
     app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));
 
     app.post('/api/projects/:id/security/dependency-scans', h(async (req, res) => {
-      const r = await this.session(req).deps.start('manual');
+      const { tools, trigger } = z.object({
+        tools: z.array(z.enum(['osv-api', 'npm-audit', 'osv-scanner', 'trivy'])).min(1).optional(),
+        trigger: z.enum(['manual', 'agent']).default('manual'),
+      }).parse(req.body ?? {});
+      const r = await this.session(req).deps.start(trigger, tools);
       res.status(202);
       return r;
     }));

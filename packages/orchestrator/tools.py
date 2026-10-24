@@ -1,10 +1,13 @@
-"""Three dummy cybersec tools. Lightly functional: each does a real, small check against
-the running sample-app rather than returning a canned result, but none of them is a real
-scanner — they exist to prove the orchestration wiring, not to find real-world CVEs.
+"""Endpoint probes: lightweight checks the orchestrator runs directly against the running
+sample-app. These are not real scanners — they prove the per-endpoint orchestration wiring.
+The real dependency-vulnerability scanners (OSV, npm audit, Trivy) are run by the harness
+service via harness.run_dependency_scan, not from here.
 """
 import re
 import pathlib
 import requests
+
+import harness
 
 SAMPLE_APP_URL = "http://127.0.0.1:3000"
 SAMPLE_APP_SRC = pathlib.Path(__file__).parent.parent.parent / "sample-app" / "src"
@@ -81,3 +84,28 @@ def secret_scan(endpoint: dict) -> dict | None:
         "summary": f"{len(hits)} hardcoded-secret-shaped string(s) found in source",
         "evidence": {"locations": hits},
     }
+
+
+def run_dependency_scanners(project_id: str, tools: list[str]) -> list[dict]:
+    """Ask the harness to run the given real scanners against the project's lockfile, then turn each
+    advisory observation into a finding record. One scan may return many findings (one per advisory).
+    The harness persists the full run in MongoDB; these records are the orchestrator's own memory copy."""
+    result = harness.run_dependency_scan(project_id, tools)
+    run, observations = result["run"], result.get("observations") or []
+    findings = []
+    for obs in observations:
+        findings.append({
+            "tool": obs.get("tool"),
+            "endpoint": "(dependency)",
+            "severity": obs.get("severity"),
+            "summary": f"{obs.get('packageName')}@{obs.get('installedVersion')}: {obs.get('advisoryId')} ({obs.get('title') or 'no title'})",
+            "evidence": {
+                "advisoryId": obs.get("advisoryId"),
+                "package": obs.get("packageName"),
+                "installedVersion": obs.get("installedVersion"),
+                "fixedVersions": obs.get("fixedVersions"),
+                "url": obs.get("url"),
+                "runId": run.get("_id"),
+            },
+        })
+    return findings
