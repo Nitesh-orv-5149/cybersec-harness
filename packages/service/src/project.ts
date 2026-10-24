@@ -17,6 +17,8 @@ import { classify, diffScreenshots, type ComparisonItem } from './compare.js';
 import { graphFindings, runtimeFindings, type FindingDraft } from './findings.js';
 import { log } from './log.js';
 import { newId, sha256, shortHash } from './util.js';
+import { DependencyScanService } from './security/deps/service.js';
+import type { Exec, Which } from './security/types.js';
 
 export type BrowserRunStatus = 'pending' | 'building' | 'browser_running' | 'comparing' | 'completed' | 'failed' | 'inconclusive' | 'cancelled';
 
@@ -67,14 +69,21 @@ export class ProjectSession extends EventEmitter {
   browserJob: { runId: string; status: BrowserRunStatus; abort: AbortController; candidateSnapshotId?: string; startedAt: Date; phase?: string } | null = null;
   private verifyQueued = false;
   lastBrowserRun: Record<string, unknown> | null = null;
+  readonly deps: DependencyScanService;
 
-  constructor(readonly root: string, private readonly store: Store, private readonly dataDir: string) {
+  constructor(readonly root: string, private readonly store: Store, private readonly dataDir: string, scannerHooks: { exec?: Exec; which?: Which } = {}) {
     super();
     this.root = fs.realpathSync(root);
     this.id = `prj_${shortHash(this.root, 16)}`;
     this.name = path.basename(this.root);
     this.loaded = loadProjectConfig(this.root);
     this.makeAnalyzer();
+    this.deps = new DependencyScanService({
+      projectId: this.id, root: this.root, projectDir: this.projectDir, store: this.store,
+      cfg: () => this.cfg.security, graph: () => this.live?.graph ?? null, facts: () => this.analyzer.factsList(),
+      graphVersion: () => this.live?.graphVersion ?? null, sourceHash: () => this.live?.sourceHash ?? null,
+      emit: (kind, payload) => this.emitState(kind, payload), ...scannerHooks,
+    });
   }
 
   get cfg(): ProjectConfig { return this.loaded.config; }
@@ -103,6 +112,7 @@ export class ProjectSession extends EventEmitter {
     fs.mkdirSync(this.projectDir, { recursive: true });
     await this.persistProject();
     await this.loadPersistedState();
+    await this.deps.loadLastRun();
     await this.runAnalysis([], 'initial', true);
   }
 
@@ -180,6 +190,7 @@ export class ProjectSession extends EventEmitter {
 
   async dispose() {
     this.browserJob?.abort.abort();
+    this.deps.cancel();
     await this.stopMonitoring().catch(() => {});
   }
 
@@ -629,6 +640,7 @@ export class ProjectSession extends EventEmitter {
       verification: ready,
       lastBrowserRun: this.lastBrowserRun ? { id: this.lastBrowserRun._id, status: this.lastBrowserRun.status, candidateSnapshotId: this.lastBrowserRun.candidateSnapshotId, finishedAt: this.lastBrowserRun.finishedAt, error: this.lastBrowserRun.error ?? null } : null,
       store: { available: this.store.available, error: this.store.lastError },
+      security: { dependencies: this.deps.status() },
     };
   }
 

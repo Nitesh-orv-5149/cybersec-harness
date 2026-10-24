@@ -1,0 +1,43 @@
+{
+  "_fixture": "SYNTHETIC. Hand-written from the documented Trivy JSON report layout (SchemaVersion 2, Results[].Target/Class/Type/Vulnerabilities[]). NOT produced by Trivy; replace with real output once the tool can be installed. Advisory contents are illustrative test data.",
+  "SchemaVersion": 2,
+  "ArtifactName": ".",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "package-lock.json",
+      "Class": "lang-pkgs",
+      "Type": "npm",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2021-23337",
+          "PkgName": "lodash",
+          "InstalledVersion": "4.17.20",
+          "FixedVersion": "4.17.21",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Title": "nodejs-lodash: command injection via template",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2021-23337",
+          "CweIDs": ["CWE-94"],
+          "CVSS": { "nvd": { "V3Score": 7.2, "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H" } }
+        },
+        {
+          "VulnerabilityID": "SYNTHETIC-TRIVY-0001",
+          "PkgName": "minimist",
+          "InstalledVersion": "1.2.5",
+          "FixedVersion": "1.2.6, 0.2.4",
+          "Status": "fixed",
+          "Severity": "CRITICAL"
+        },
+        {
+          "VulnerabilityID": "SYNTHETIC-TRIVY-0002",
+          "PkgName": "cookie",
+          "InstalledVersion": "0.4.0",
+          "Severity": "UNKNOWN",
+          "Status": "affected"
+        }
+      ]
+    },
+    { "Target": "nested/package-lock.json", "Class": "lang-pkgs", "Type": "npm", "Vulnerabilities": null }
+  ]
+}

@@ -185,3 +185,11 @@ pre.log { background: #10141a; border: 1px solid var(--line); border-radius: var
   .shots { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* dependency scanning */
+.sev-unknown { color: var(--muted); border-style: dashed; }
+.st-not_currently_observed, .st-scanner_detected { color: var(--warn); border-color: rgba(224, 176, 74, 0.5); }
+.st-open { color: var(--text); }
+.kv.wide { grid-template-columns: 120px 1fr; }
+.tbl tr.clickable { cursor: pointer; }
+.tbl tr.clickable:hover td { background: var(--panel); }

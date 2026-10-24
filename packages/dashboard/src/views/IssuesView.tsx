@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Ctx } from '../App';
-import { api, artifactUrl, timeAgo, type Finding } from '../api';
+import { api, artifactUrl, timeAgo, TOOL_LABEL, type Finding } from '../api';
 import { Index } from '../graphUtil';
 import { PathChain } from './GraphView';
 
@@ -11,19 +11,29 @@ const CLASS_LABEL: Record<string, string> = {
   potentially_related: 'Potentially related',
   unverified: 'Unverified',
   inconclusive: 'Inconclusive',
+  scanner_detected: 'Scanner detected',
 };
+const SOURCE_LABEL = (f: Finding) => f.source === 'graph' ? 'Code analysis' : f.source === 'runtime' ? 'Website run' : `Dependency scan (${(f.scanners ?? []).map((t) => TOOL_LABEL[t] ?? t).join(', ')})`;
+const STATUS_LABEL: Record<string, string> = { open: 'open', resolved: 'resolved', not_currently_observed: 'not currently observed' };
+const safeHref = (u: string) => (/^https?:\/\//i.test(u) ? u : null);
 const ACTION_LABEL: Record<string, string> = {
   observed: 'First observed', reopened: 'Observed again', verified_fixed: 'Verified fixed by browser run', resolved_by_analysis: 'Resolved: path no longer in graph',
+  not_currently_observed: 'Not reported by the same scanner (version unchanged)', potential_regression: 'Reported again (potential regression)', version_removed: 'Resolved: vulnerable version no longer installed',
 };
 
 export function IssuesView({ ctx }: { ctx: Ctx }) {
-  const [status, setStatus] = useState<'open' | 'resolved' | 'all'>('open');
-  const [source, setSource] = useState<'all' | 'graph' | 'runtime'>('all');
+  const [status, setStatus] = useState<'open' | 'resolved' | 'not_currently_observed' | 'all'>('open');
+  const [source, setSource] = useState<'all' | 'graph' | 'runtime' | 'dependency'>('all');
   const [items, setItems] = useState<Finding[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [current, setCurrent] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ finding: Finding; records: any[] } | null>(null);
   const index = useMemo(() => (ctx.graph?.graph ? new Index(ctx.graph.graph) : null), [ctx.graph]);
+  // Deep link from other views: selection.from = 'finding:<id>'
+  useEffect(() => {
+    const m = ctx.selection.from?.match(/^finding:(.+)$/);
+    if (m) { setCurrent(m[1]); setStatus('all'); }
+  }, [ctx.selection.from]);
 
   useEffect(() => {
     api.get<Finding[]>(`/api/projects/${ctx.projectId}/findings${status === 'all' ? '' : `?status=${status}`}`)
@@ -44,10 +54,10 @@ export function IssuesView({ ctx }: { ctx: Ctx }) {
       <div className="master">
         <div className="toolbar">
           <select className="input" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value as any)} aria-label="Status">
-            <option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option>
+            <option value="open">Open</option><option value="not_currently_observed">Not currently observed</option><option value="resolved">Resolved</option><option value="all">All</option>
           </select>
           <select className="input" style={{ width: 'auto' }} value={source} onChange={(e) => setSource(e.target.value as any)} aria-label="Source">
-            <option value="all">Code and website</option><option value="graph">Code analysis</option><option value="runtime">Website runs</option>
+            <option value="all">All sources</option><option value="graph">Code analysis</option><option value="runtime">Website runs</option><option value="dependency">Dependency scans</option>
           </select>
           <span className="muted small">{shown.length}</span>
         </div>
@@ -57,10 +67,11 @@ export function IssuesView({ ctx }: { ctx: Ctx }) {
             <div className="row">
               <span className={`chip sev-${f.severity}`}>{f.severity}</span>
               <span className={`chip st-${f.classification}`}>{CLASS_LABEL[f.classification] ?? f.classification}</span>
-              {f.status === 'resolved' && <span className="chip st-resolved">resolved</span>}
+              {f.status && f.status !== 'open' && <span className={`chip st-${f.status}`}>{STATUS_LABEL[f.status] ?? f.status}</span>}
+              {f.potentialRegression && f.status === 'open' && <span className="chip st-failed">potential regression</span>}
             </div>
             <div className="t">{f.title}</div>
-            <div className="small faint">{f.source === 'graph' ? 'Code analysis' : 'Website run'} · last seen {timeAgo(f.lastSeenAt)}</div>
+            <div className="small faint">{SOURCE_LABEL(f)} · last seen {timeAgo(f.lastSeenAt)}</div>
           </button>
         ))}
       </div>
@@ -77,10 +88,11 @@ function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[];
   return (
     <>
       <div className="section">
-        <div className="row"><span className={`chip sev-${f.severity}`}>{f.severity}</span><span className={`chip st-${f.classification}`}>{CLASS_LABEL[f.classification] ?? f.classification}</span><span className="chip">{f.status ?? 'open'}</span><span className="faint small mono">{f._id}</span></div>
+        <div className="row"><span className={`chip sev-${f.severity}`}>{f.severity}</span><span className={`chip st-${f.classification}`}>{CLASS_LABEL[f.classification] ?? f.classification}</span><span className={`chip st-${f.status ?? 'open'}`}>{STATUS_LABEL[f.status ?? 'open'] ?? f.status}</span>{f.potentialRegression && <span className="chip st-failed">potential regression</span>}<span className="faint small mono">{f._id}</span></div>
         <h2 style={{ marginTop: 8 }}>{f.title}</h2>
-        <p className="muted small">First seen {timeAgo(f.firstSeenAt)} · last seen {timeAgo(f.lastSeenAt)} · confidence {f.confidence}</p>
+        <p className="muted small">First seen {timeAgo(f.firstSeenAt)} · last seen {timeAgo(f.lastSeenAt)} · confidence {f.confidence}{f.confidenceNote ? ` (${f.confidenceNote})` : ''}</p>
       </div>
+      {f.source === 'dependency' && f.pkg && <DependencyDetail f={f} ctx={ctx} />}
       <div className="section">
         <h3>What was found</h3>
         <ul className="explain">{f.explanation.map((e, i) => <li key={i}>{e}</li>)}</ul>
@@ -100,7 +112,7 @@ function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[];
       )}
       {paths.length > 0 && (
         <div className="section">
-          <h3>{f.source === 'graph' ? 'Reachability paths' : 'Dependency paths from what the scenario exercised to the changed code'}</h3>
+          <h3>{f.source === 'graph' ? 'Reachability paths' : f.source === 'dependency' ? 'Endpoints whose code calls into this package (existing code graph)' : 'Dependency paths from what the scenario exercised to the changed code'}</h3>
           {paths.map((p, i) => <PathChain key={i} path={p} index={index} ctx={ctx} changed={changed} />)}
           <button className="btn small" onClick={() => ctx.select({ nodeId: paths[0][paths[0].length - 1], path: paths[0], from: 'finding' }, 'graph')}>Show in graph</button>
         </div>
@@ -114,10 +126,58 @@ function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[];
         <h3>Verification history</h3>
         {records.length ? (
           <table className="tbl"><tbody>{records.map((r) => (
-            <tr key={r._id}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(r.at).toLocaleString()}</td><td>{ACTION_LABEL[r.action] ?? r.action}</td><td className="mono small muted">{r.browserRunId ?? r.analysisRunId}</td><td className="muted">{r.result}</td></tr>
+            <tr key={r._id}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(r.at).toLocaleString()}</td><td>{ACTION_LABEL[r.action] ?? r.action}</td><td className="mono small muted">{r.browserRunId ?? r.securityRunId ?? r.analysisRunId}</td><td className="muted">{r.result}</td></tr>
           ))}</tbody></table>
         ) : <p className="muted small">No records yet.</p>}
       </div>
+    </>
+  );
+}
+
+const USE_CHIP: Record<string, string> = {
+  called_from_analysed_code: 'st-failed', imported_by_analysed_code: 'st-observed', transitive: 'st-observed', declared_not_imported: '', not_in_lockfile: '',
+};
+
+function DependencyDetail({ f, ctx }: { f: Finding; ctx: Ctx }) {
+  const p = f.pkg!;
+  const [obs, setObs] = useState<any[] | null>(null);
+  useEffect(() => {
+    api.get<any[]>(`/api/projects/${ctx.projectId}/findings/${f._id}/observations`).then(setObs).catch(() => setObs(null));
+  }, [f._id, f.lastSeenAt]);
+  return (
+    <>
+      <div className="section">
+        <h3>Package</h3>
+        <dl className="kv wide">
+          <dt>Package</dt><dd className="mono">{p.name}@{p.version ?? 'unknown'} <span className="muted">({p.ecosystem}, {p.lockfile})</span></dd>
+          <dt>Advisory</dt><dd className="mono">{f.canonicalId}{(f.ids ?? []).filter((i) => i !== f.canonicalId).length > 0 && <span className="muted"> · also {(f.ids ?? []).filter((i) => i !== f.canonicalId).join(', ')}</span>}</dd>
+          <dt>Severity</dt><dd>{(f.evidence.severityByTool ?? []).map((s: any, i: number) => <span key={i} className="chip" style={{ marginRight: 4 }}>{TOOL_LABEL[s.tool] ?? s.tool}: {s.original ?? 'not supplied'}</span>)}{f.evidence.cvssScore != null && <span className="muted small"> CVSS {f.evidence.cvssScore}</span>}</dd>
+          {(f.cwe ?? []).length > 0 && <><dt>CWE</dt><dd className="mono">{f.cwe!.join(', ')}</dd></>}
+          <dt>Affected</dt><dd className="mono">{p.affectedRanges.length ? [...new Set(p.affectedRanges.map((r) => r.range))].join(' | ') : <span className="muted">not supplied</span>}</dd>
+          <dt>Fixed in</dt><dd className="mono">{p.fixedVersions === null ? <span className="muted">not supplied by the scanner</span> : p.fixedVersions.length ? p.fixedVersions.join(', ') : <span className="muted">no fixed version listed</span>}</dd>
+          <dt>Installed as</dt><dd>{p.direct ? `direct ${p.declaredAs ?? ''} dependency` : p.direct === false ? 'transitive dependency' : 'unknown'}{p.devOnly ? ' · development only' : ''}</dd>
+          <dt>Scanners</dt><dd>{(f.scanners ?? []).map((t) => TOOL_LABEL[t] ?? t).join(', ')}</dd>
+        </dl>
+      </div>
+      <div className="section">
+        <h3>Use in this application</h3>
+        {p.use ? (
+          <>
+            <p><span className={`chip ${USE_CHIP[p.use.evidence] ?? ''}`}>{p.use.label}</span>{(f.labels ?? []).includes('graph_linked') ? <span className="chip" style={{ marginLeft: 4 }}>graph linked</span> : <span className="chip" style={{ marginLeft: 4 }}>graph association unavailable</span>}</p>
+            <p className="muted">{p.use.summary}</p>
+            {p.use.introducedBy.length > 0 && <ul className="explain">{p.use.introducedBy.map((i, k) => <li key={k} className="mono small">{i.chain.join(' → ')} <span className="muted">({i.direct}: {i.directEvidence.replace(/_/g, ' ')})</span></li>)}</ul>}
+          </>
+        ) : <p className="muted">Unknown: no code graph was available when this was scanned.</p>}
+      </div>
+      {(f.references ?? []).length > 0 && <div className="section"><h3>References</h3><ul className="list">{f.references!.map((u) => { const h = safeHref(u); return <li key={u}>{h ? <a href={h} target="_blank" rel="noreferrer noopener">{u}</a> : <span className="mono">{u}</span>}</li>; })}</ul></div>}
+      {obs && obs.length > 0 && (
+        <div className="section">
+          <h3>Scanner observations</h3>
+          <table className="tbl"><thead><tr><th>When</th><th>Tool</th><th>Advisory</th><th>Published severity</th><th>Run</th></tr></thead><tbody>
+            {obs.slice(0, 20).map((o) => <tr key={o._id}><td className="muted">{timeAgo(o.observedAt)}</td><td>{TOOL_LABEL[o.tool] ?? o.tool} <span className="faint small">{o.toolVersion}</span></td><td className="mono small">{o.advisoryId}</td><td>{o.originalSeverity ?? <span className="muted">not supplied</span>}</td><td className="mono small muted">{o.runId}</td></tr>)}
+          </tbody></table>
+        </div>
+      )}
     </>
   );
 }
