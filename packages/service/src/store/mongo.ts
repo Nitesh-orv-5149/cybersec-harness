@@ -8,7 +8,7 @@ export class StoreUnavailableError extends Error {
 
 export const COLLECTIONS = [
   'projects', 'file_events', 'source_snapshots', 'graph_snapshots', 'analysis_runs',
-  'graph_findings', 'browser_runs', 'browser_results', 'comparisons', 'verification_records',
+  'graph_findings','graph_nodes','graph_edges' ,'browser_runs', 'browser_results', 'comparisons', 'verification_records',
 ] as const;
 export type CollectionName = (typeof COLLECTIONS)[number];
 
@@ -91,6 +91,11 @@ export class Store {
       db.collection('comparisons').createIndex({ projectId: 1, createdAt: -1 }),
       db.collection('comparisons').createIndex({ browserRunId: 1 }, { unique: true }),
       db.collection('verification_records').createIndex({ projectId: 1, findingId: 1, at: -1 }),
+      db.collection('graph_nodes').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
+      db.collection('graph_nodes').createIndex({ projectId: 1, nodeId: 1 }),
+      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
+      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, source: 1 }),
+      db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, target: 1 }),
     ]);
   }
 

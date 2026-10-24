@@ -351,6 +351,28 @@ export class ProjectSession extends EventEmitter {
         { $setOnInsert: { _id: id as never, projectId: this.id, graphHash, sourceHash, parserVersion: graph.provider, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, stats: graph.stats, createdAt: new Date(), ...body }, $addToSet: { labels: label } },
         { upsert: true },
       );
+
+      // NEW: one document per node / edge. _id = graphHash:id, so saving the same graph twice never duplicates.
+      //newId('gn') and newId('ge') are not used here, because we want to be able to query by graphHash and node/edge id.
+      const now = new Date();
+      if (graph.nodes.length) {
+        await this.store.col('graph_nodes').bulkWrite(graph.nodes.map((n) => ({
+          updateOne: {
+            filter: { _id: `${graphHash}:${n.id}` as never },
+            update: { $setOnInsert: { _id: `${graphHash}:${n.id}` as never, projectId: this.id, graphHash, graphId: id, nodeId: n.id, kind: n.kind, label: n.label, loc: n.loc ?? null, hash: n.hash ?? null, meta: n.meta ?? {}, createdAt: now } },
+            upsert: true,
+          },
+        })), { ordered: false });
+      }
+      if (graph.edges.length) {
+        await this.store.col('graph_edges').bulkWrite(graph.edges.map((e) => ({
+          updateOne: {
+            filter: { _id: `${graphHash}:${e.id}` as never },
+            update: { $setOnInsert: { _id: `${graphHash}:${e.id}` as never, projectId: this.id, graphHash, graphId: id, edgeId: e.id, source: e.source, target: e.target, kind: e.kind, certainty: e.certainty, confidence: e.confidence, derivation: e.derivation, loc: e.loc ?? null, createdAt: now } },
+            upsert: true,
+          },
+        })), { ordered: false });
+      }
     }, undefined);
     return id;
   }
