@@ -42,6 +42,19 @@ def changed_endpoints(project_id: str) -> list[dict]:
     ]
 
 
+def log_event(project_id: str, type: str, title: str, *, endpoint: str | None = None,
+              tool: str | None = None, severity: str | None = None, detail: str | None = None,
+              data: dict | None = None) -> None:
+    """Report one agent-activity event to the harness so it shows up in the dashboard's AI agent tab.
+    Best-effort: a logging failure must never stop the investigation."""
+    payload = {"type": type, "title": title, "endpoint": endpoint, "tool": tool,
+               "severity": severity, "detail": detail, "data": data}
+    try:
+        requests.post(_url(project_id, "/agent/events"), json=payload, timeout=5)
+    except requests.RequestException as e:
+        print(f"[agent-log] could not report event ({e})")
+
+
 def ready_scanners(project_id: str) -> list[dict]:
     """Dependency scanners the service reports as usable right now (installed, working, network allowed)."""
     scanners = requests.get(_url(project_id, "/security/scanners"), timeout=30).json()

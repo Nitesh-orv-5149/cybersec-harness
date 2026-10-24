@@ -36,6 +36,12 @@ npm start -- --project ./sample-app
 
 Options: `--port`, `--mongo <uri>`, `--db <name>`, `--no-monitor`, repeat `--project` for several folders. Env: `WORKBENCH_MONGO_URI`, `WORKBENCH_DATA_DIR` (snapshots/screenshots, default `~/.local/share/workbench`), `WORKBENCH_LOG_LEVEL`.
 
+> Using MongoDB Atlas (or any non-default URI) from a `.env` file? The CLI does not auto-load `.env`, so start it with Node's own loader:
+> ```sh
+> node --env-file=.env packages/service/dist/cli.js --project ./sample-app
+> ```
+> `.env` holds `WORKBENCH_MONGO_URI` and `WORKBENCH_MONGO_DB`. Without a reachable MongoDB the live graph still updates, but history, findings, dependency scans and the AI-agent log are disabled.
+
 ### VS Code extension
 
 ```sh
@@ -44,6 +50,28 @@ cd packages/extension && npm run build
 ```
 
 Commands: *Start monitoring this workspace*, *Open dashboard*, *Mark current files as baseline*, *Compare current files with baseline*, *Re-analyse*, *Full rescan*. The status bar shows analysis/website state. Unsaved buffers are sent (debounced) for analysis only; the graph marks them with a dashed outline and website runs never include them. "Open in editor" in the dashboard jumps to the source location.
+
+### LLM orchestrator (the AI agent)
+
+`packages/orchestrator` is a small Python agent that watches the harness's live graph over the WebSocket and, when a code change touches an endpoint, decides which security tools to run against it. It does not run scanners itself: it asks the harness to run the **real** dependency scanners (npm audit, OSV-Scanner, OSV.dev API, Trivy) so results land in the same MongoDB and dashboard as everything else. It also runs three lightweight endpoint probes (`auth_probe`, `sqli_probe`, `secret_scan`) directly against the running app. Every step — the change it noticed, the tools it chose (and whether the model or the fallback chose them), and each result — is reported to the harness and shown live in the dashboard's **AI agent** tab.
+
+```sh
+# 1. the harness and the app it monitors must be running first
+node --env-file=.env packages/service/dist/cli.js --project ./sample-app   # terminal 1
+(cd sample-app && node src/server.js)                                      # terminal 2 (the app under test, on :3000)
+
+# 2. (optional) a local model for the tool-choice step — without it the agent safely falls back to running every available tool
+#    install Ollama, then:  ollama pull qwen3:4b-instruct-2507-q8_0
+
+# 3. the agent
+python3 -m venv packages/orchestrator/.venv
+packages/orchestrator/.venv/bin/pip install -r packages/orchestrator/requirements.txt
+packages/orchestrator/.venv/bin/python packages/orchestrator/main.py                 # terminal 3
+```
+
+Now edit a watched route (e.g. append a line to `sample-app/src/routes/orders.js`): within ~1s the harness re-analyses, the agent wakes, picks tools, runs them, and the **AI agent** dashboard tab fills with its decisions and findings. The agent only offers the model scanners the harness currently reports as *ready* (installed and reachable), so it can never pick a tool that isn't usable. Dependency scans are project-wide, so the agent runs them once per change batch rather than once per endpoint.
+
+Config: the harness and app URLs and the Ollama model live at the top of `packages/orchestrator/harness.py` and `llm.py`. The agent's own copy of findings is a flat `packages/orchestrator/memory.json` (a stand-in for a Mongo collection); the authoritative scan runs are persisted by the harness.
 
 ## Demo walkthrough (sample app)
 

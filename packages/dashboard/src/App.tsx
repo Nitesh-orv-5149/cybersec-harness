@@ -6,8 +6,9 @@ import { ReachabilityView } from './views/ReachabilityView';
 import { CompareView } from './views/CompareView';
 import { HistoryView } from './views/HistoryView';
 import { SecurityView } from './views/SecurityView';
+import { AgentView } from './views/AgentView';
 
-export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'history';
+export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'agent' | 'history';
 
 export interface Selection { nodeId: string | null; path: string[] | null; from?: string }
 
@@ -27,6 +28,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'reach', label: 'Reachability' },
   { id: 'compare', label: 'Website comparison' },
   { id: 'security', label: 'Dependency scan' },
+  { id: 'agent', label: 'AI agent' },
   { id: 'history', label: 'History' },
 ];
 
@@ -88,6 +90,7 @@ export function App() {
         if (m.kind === 'browser') bump('browser');
         if (m.kind === 'baseline') { refreshGraph(); bump('browser'); }
         if (m.kind === 'security') bump('security');
+        if (m.kind === 'agent') bump('agent');
         bump('history');
         refreshStatus();
       };
@@ -136,6 +139,7 @@ export function App() {
         {tab === 'reach' && <ReachabilityView ctx={ctx} />}
         {tab === 'compare' && <CompareView ctx={ctx} />}
         {tab === 'security' && <SecurityView ctx={ctx} />}
+        {tab === 'agent' && <AgentView ctx={ctx} />}
         {tab === 'history' && <HistoryView ctx={ctx} />}
       </main>
     </div>

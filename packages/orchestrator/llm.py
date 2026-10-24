@@ -23,10 +23,11 @@ Dependency vulnerability scanners (run against the project's package-lock.json):
 """
 
 
-def choose_tools(endpoint: dict, available: list[str]) -> list[str]:
+def choose_tools(endpoint: dict, available: list[str]) -> tuple[list[str], str]:
     """Ask the model which of the currently-available tools are worth running for this change.
     `available` is the set the orchestrator can actually run right now (ready scanners + probes).
-    Falls back to running everything available if the model is unreachable or answers oddly."""
+    Returns (chosen_tools, reason). `reason` is "llm: <model>" on a real decision, or a
+    "fallback: ..." string when the model was unreachable/unusable and all tools are run."""
     prompt = (
         f"{TOOL_MENU}\n"
         f"A code change was just detected affecting this endpoint: {endpoint['method']} {endpoint['path']}.\n"
@@ -44,7 +45,9 @@ def choose_tools(endpoint: dict, available: list[str]) -> list[str]:
         content = res.json()["message"]["content"]
         names = json.loads(content[content.index("["): content.rindex("]") + 1])
         chosen = [n for n in names if n in available]
-        return chosen or list(available)
+        if chosen:
+            return chosen, f"llm: {MODEL}"
+        return list(available), f"fallback: {MODEL} returned no valid tool names"
     except (requests.RequestException, KeyError, ValueError, json.JSONDecodeError) as e:
         print(f"[llm] could not get a decision ({e}), running all available tools")
-        return list(available)
+        return list(available), f"fallback: model unreachable ({type(e).__name__})"

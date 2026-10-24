@@ -193,3 +193,12 @@ pre.log { background: #10141a; border: 1px solid var(--line); border-radius: var
 .kv.wide { grid-template-columns: 120px 1fr; }
 .tbl tr.clickable { cursor: pointer; }
 .tbl tr.clickable:hover td { background: var(--panel); }
+
+/* AI agent activity log */
+.agent-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.agent-row { border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: 6px; padding: 8px 12px; background: var(--panel); }
+.agent-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.agent-title { font-size: 13.5px; }
+.agent-detail { margin-top: 6px; }
+.agent-detail .btn.small { padding: 1px 8px; font-size: 11.5px; }
+.agent-json { margin: 6px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: pre; color: var(--muted); }
