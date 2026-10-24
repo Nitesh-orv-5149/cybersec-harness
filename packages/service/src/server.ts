@@ -1,4 +1,7 @@
 // Local HTTP + WebSocket API. Binds to loopback only and rejects cross-site requests.
+import { sha256 } from './util.js';
+import { registerAgentRoutes } from './agentMemory.js';
+import { validateFindingReview, validateRequirementInput, validateVerificationInput } from './store/schemas.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -66,6 +69,8 @@ export class Service {
 
     const h = (fn: (req: Request, res: Response) => Promise<unknown> | unknown) =>
       (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res)).then((v) => { if (!res.headersSent) res.json(v ?? { ok: true }); }).catch(next);
+
+    registerAgentRoutes(app, h, this.store, (req) => this.session(req).id);
 
     app.get('/api/health', h(() => ({
       ok: true, mongo: { available: this.store.available, error: this.store.lastError }, browser: browserAvailable(),
@@ -137,6 +142,75 @@ export class Service {
       const finding = await this.store.col('graph_findings').findOne({ _id: req.params.fid as never, projectId: s.id });
       const records = await this.store.col('verification_records').find({ projectId: s.id, findingId: req.params.fid }).sort({ at: -1 }).limit(50).toArray();
       return { finding, records };
+    }));
+        const bad = (errors: string[]) => Object.assign(new Error(errors.join('; ')), { status: 400 });
+
+    app.get('/api/projects/:id/requirements', h(async (req) => {
+      const s = this.session(req);
+      return this.store.col('agent_requirements').find({ projectId: s.id }).sort({ priority: 1, updatedAt: -1 }).limit(200).toArray();
+    }));
+
+    app.post('/api/projects/:id/requirements', h(async (req) => {
+      const s = this.session(req);
+      const v = validateRequirementInput({ ...req.body, projectId: s.id });
+      if (!v.ok) throw bad(v.errors);
+      const id = `req_${sha256(`${s.id}|${v.value.title}`).slice(0, 20)}`;
+      const now = new Date();
+      await this.store.col('agent_requirements').updateOne(
+        { _id: id as never },
+        { $set: { ...v.value, updatedAt: now }, $inc: { version: 1 }, $setOnInsert: { createdAt: now } },
+        { upsert: true },
+      );
+      return this.store.col('agent_requirements').findOne({ _id: id as never });
+    }));
+
+    app.post('/api/projects/:id/findings/:fid/review', h(async (req) => {
+      const s = this.session(req);
+      const body = { ...req.body, reviewedAt: req.body?.reviewedAt ? new Date(req.body.reviewedAt) : req.body?.reviewed ? new Date() : null };
+      const v = validateFindingReview(body);
+      if (!v.ok) throw bad(v.errors);
+      const r = await this.store.col('graph_findings').updateOne({ _id: req.params.fid as never, projectId: s.id }, { $set: { review: v.value } });
+      if (!r.matchedCount) throw Object.assign(new Error('unknown finding'), { status: 404 });
+      return { ok: true, review: v.value };
+    }));
+
+    app.post('/api/projects/:id/verification', h(async (req) => {
+      const s = this.session(req);
+      const v = validateVerificationInput({ ...req.body, projectId: s.id });
+      if (!v.ok) throw bad(v.errors);
+      const doc = { _id: `ver_${sha256(`${Date.now()}|${v.value.findingId}|${v.value.action}`).slice(0, 20)}`, ...v.value, at: new Date() };
+      await this.store.col('verification_records').insertOne(doc as never);
+      return doc;
+    }));
+
+    // ---- dependency vulnerability scanning (external tools; never downloaded or installed by the service) ----
+    app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));
+
+    app.post('/api/projects/:id/security/dependency-scans', h(async (req, res) => {
+      const r = await this.session(req).deps.start('manual');
+      res.status(202);
+      return r;
+    }));
+
+    app.post('/api/projects/:id/security/dependency-scans/cancel', h((req) => ({ cancelled: this.session(req).deps.cancel() })));
+
+    app.get('/api/projects/:id/security/dependency-scans', h(async (req) => {
+      const s = this.session(req);
+      return this.store.col('security_scan_runs').find({ projectId: s.id, category: 'dependency_vulns' }, { projection: { readiness: 0 } }).sort({ startedAt: -1 }).limit(30).toArray();
+    }));
+
+    app.get('/api/projects/:id/security/dependency-scans/:rid', h(async (req) => {
+      const s = this.session(req);
+      const run = await this.store.col('security_scan_runs').findOne({ _id: req.params.rid as never, projectId: s.id });
+      const observations = await this.store.col('security_observations').find({ runId: req.params.rid, projectId: s.id }).limit(2000).toArray();
+      return { run, observations };
+    }));
+
+    app.get('/api/projects/:id/security/summary', h(async (req) => this.store.dependencySummary(this.session(req).id)));
+
+    app.get('/api/projects/:id/findings/:fid/observations', h(async (req) => {
+      const s = this.session(req);
+      return this.store.col('security_observations').find({ projectId: s.id, findingId: req.params.fid }).sort({ observedAt: -1 }).limit(200).toArray();
     }));
 
     app.post('/api/projects/:id/baseline', h(async (req) => this.session(req).markBaseline()));
@@ -242,6 +316,7 @@ export class Service {
 
   async start() {
     await this.store.connect();
+    if (this.store.available) this.store.watchCollection('graph_findings', (e) => this.broadcast({ kind: 'findings', projectId: e.projectId, at: new Date().toISOString(), payload: { source: 'change-stream', op: e.op } }));
     const app = this.app();
     this.server = http.createServer(app);
     this.wss = new WebSocketServer({ noServer: true });

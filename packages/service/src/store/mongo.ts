@@ -1,14 +1,17 @@
 // MongoDB persistence. All history lives here; the service keeps only the *current* live graph in memory.
 import { MongoClient, type Collection, type Db, type Document } from 'mongodb';
 import { log } from '../log.js';
+import { REQUIREMENT_JSON_SCHEMA } from './schemas.js';
+import { ensureAgentMemory } from './agentMemory.js';
 
 export class StoreUnavailableError extends Error {
   constructor(msg = 'MongoDB is unavailable') { super(msg); this.name = 'StoreUnavailableError'; }
 }
 
 export const COLLECTIONS = [
-  'projects', 'file_events', 'source_snapshots', 'graph_snapshots', 'analysis_runs',
-  'graph_findings','graph_nodes','graph_edges' ,'browser_runs', 'browser_results', 'comparisons', 'verification_records',
+  'projects', 'file_events', 'source_snapshots', 'graph_snapshots', 'analysis_runs','agent_runs', 'agent_events', 'agent_memories',
+  'graph_findings','agent_requirements','graph_nodes','graph_edges' ,'browser_runs', 'browser_results', 'comparisons', 'verification_records',
+  'security_scan_runs', 'security_observations',
 ] as const;
 export type CollectionName = (typeof COLLECTIONS)[number];
 
@@ -28,7 +31,7 @@ export class Store {
       await this.client.connect();
       this.db = this.client.db(this.dbName);
       await this.db.command({ ping: 1 });
-      await this.ensureIndexes();
+      await this.ensureIndexes();      
       this.setAvailable(true, null);
       this.client.on('serverHeartbeatFailed', () => this.setAvailable(false, 'heartbeat failed'));
       this.client.on('serverHeartbeatSucceeded', () => { if (!this.available) this.setAvailable(true, null); });
@@ -72,8 +75,37 @@ export class Store {
     return this.db.collection<T>(name);
   }
 
+    /** Create agent_requirements with a database-level $jsonSchema validator. */
+  private async ensureValidatedCollections() {
+    const db = this.db!;
+    const validator = { $jsonSchema: REQUIREMENT_JSON_SCHEMA as unknown as Document };
+    try {
+      const exists = (await db.listCollections({ name: 'agent_requirements' }).toArray()).length > 0;
+      if (exists) await db.command({ collMod: 'agent_requirements', validator, validationLevel: 'strict', validationAction: 'error' });
+      else await db.createCollection('agent_requirements', { validator, validationLevel: 'strict', validationAction: 'error' });
+    } catch (e) {
+      log.warn(`could not apply MongoDB schema validator to agent_requirements: ${String((e as Error).message ?? e)}`);
+    }
+  }
+
+  /** Change stream: fires on every change in a collection. */
+  watchCollection(name: CollectionName, onChange: (e: { op: string; projectId?: string }) => void) {
+    try {
+      const stream = this.col(name).watch([], { fullDocument: 'updateLookup' });
+      stream.on('change', (c) => onChange({ op: c.operationType, projectId: (c as { fullDocument?: { projectId?: string } }).fullDocument?.projectId }));
+      stream.on('error', (e) => log.warn(`change stream on ${name} stopped: ${String(e)}`));
+      return stream;
+    } catch (e) {
+      log.warn(`change stream on ${name} unavailable: ${String(e)}`);
+      return null;
+    }
+  }
+
   private async ensureIndexes() {
     const db = this.db!;
+    await ensureAgentMemory(db);
+    await this.ensureValidatedCollections();
+    await db.collection('agent_requirements').createIndex({ projectId: 1, status: 1, priority: 1 });
     await Promise.all([
       db.collection('projects').createIndex({ root: 1 }, { unique: true }),
       db.collection('file_events').createIndex({ projectId: 1, dedupeKey: 1 }, { unique: true }),
@@ -91,6 +123,13 @@ export class Store {
       db.collection('comparisons').createIndex({ projectId: 1, createdAt: -1 }),
       db.collection('comparisons').createIndex({ browserRunId: 1 }, { unique: true }),
       db.collection('verification_records').createIndex({ projectId: 1, findingId: 1, at: -1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, source: 1, 'pkg.name': 1, 'pkg.version': 1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, ids: 1 }),
+      db.collection('security_scan_runs').createIndex({ projectId: 1, category: 1, startedAt: -1 }),
+      db.collection('security_scan_runs').createIndex({ projectId: 1, status: 1 }),
+      db.collection('security_observations').createIndex({ projectId: 1, findingId: 1, observedAt: -1 }),
+      db.collection('security_observations').createIndex({ runId: 1, tool: 1 }),
+      db.collection('security_observations').createIndex({ projectId: 1, 'package.name': 1, advisoryId: 1 }),
       db.collection('graph_nodes').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
       db.collection('graph_nodes').createIndex({ projectId: 1, nodeId: 1 }),
       db.collection('graph_edges').createIndex({ projectId: 1, graphHash: 1, kind: 1 }),
@@ -148,5 +187,26 @@ export class Store {
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]).toArray();
     return { findings, activity, browserRunsByStatus: runs };
+  }
+
+  /** Dependency findings by lifecycle, severity, use evidence and reporting tool, plus scan runs by status. */
+  async dependencySummary(projectId: string) {
+    const [f] = await this.col('graph_findings').aggregate([
+      { $match: { projectId, source: 'dependency' } },
+      {
+        $facet: {
+          byStatus: [{ $group: { _id: '$status', count: { $sum: 1 } } }],
+          openBySeverity: [{ $match: { status: 'open' } }, { $group: { _id: '$severity', count: { $sum: 1 } } }],
+          openByUse: [{ $match: { status: 'open' } }, { $group: { _id: '$pkg.use.evidence', count: { $sum: 1 } } }],
+          openByTool: [{ $match: { status: 'open' } }, { $unwind: '$scanners' }, { $group: { _id: '$scanners', count: { $sum: 1 } } }],
+          regressions: [{ $match: { status: 'open', potentialRegression: true } }, { $count: 'count' }],
+        },
+      },
+    ]).toArray();
+    const runs = await this.col('security_scan_runs').aggregate([
+      { $match: { projectId, category: 'dependency_vulns' } },
+      { $group: { _id: '$status', count: { $sum: 1 }, last: { $max: '$startedAt' } } },
+    ]).toArray();
+    return { findings: f, runsByStatus: runs };
   }
 }

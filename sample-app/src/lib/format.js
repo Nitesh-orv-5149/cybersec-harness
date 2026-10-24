@@ -1,6 +1,6 @@
 // Shared formatting helpers used by several endpoints.
 export function formatCurrency(cents) {
-  return `₹${(cents / 100).toFixed(2)}`;
+  return `Rs ${Math.round(cents / 100)}`;
 }
 
 export function formatDate(ms) {
