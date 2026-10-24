@@ -144,7 +144,9 @@ function KindPanel({ k, ctx, reload }: { k: KindStatus; ctx: Ctx; reload: () => 
                 </tr>
               ))}</tbody>
             </table>
-          ) : last?.counts ? <p className="muted">No open findings from the tools that ran.</p> : <p className="muted">No completed run, so there are no results (this is not the same as "no issues").</p>}
+          ) : last?.counts ? <p className="muted">No open findings from the tools that ran.</p>
+            : last?.status === 'not_applicable' ? <p className="muted">Not applicable to this project: {last.coverage?.reason ?? 'nothing for these tools to check'}. This is not a clean result.</p>
+            : <p className="muted">No completed run, so there are no results (this is not the same as "no issues").</p>}
         </div>
       )}
 
@@ -175,7 +177,7 @@ export function whereOf(f: Finding): string {
   if (!l) return '—';
   if (l.operation) return l.operation;
   if (l.url) return `${l.method ? `${l.method} ` : ''}${l.url}`;
-  if (l.file) return `${l.file}${l.line ? `:${l.line}` : ''}`;
+  if (l.file) return `${l.file}${l.line ? `:${l.line}` : ''}${l.resource ? ` (${l.resource})` : ''}${l.commit ? ` @ ${l.commit.slice(0, 10)}` : ''}`;
   return '—';
 }
 

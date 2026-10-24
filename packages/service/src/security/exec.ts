@@ -47,7 +47,8 @@ export const execTool: Exec = (binary, args, opts) => new Promise<ExecResult>((r
   const stderr = new OutputBuffer(8 * 1024);
   let child;
   try {
-    child = spawn(binary, args, { cwd: opts.cwd, env: opts.localOnly ? localOnlyEnv() : scannerEnv(), detached: true, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+    const env = { ...(opts.localOnly ? localOnlyEnv() : scannerEnv()), ...(opts.env ?? {}) };
+    child = spawn(binary, args, { cwd: opts.cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
   } catch (e) {
     resolve({ exitCode: null, signal: null, stdout: '', stdoutBytes: 0, stdoutTruncated: false, stderrTail: '', timedOut: false, cancelled: false, spawnError: String((e as Error).message ?? e), durationMs: 0 });
     return;
@@ -74,6 +75,7 @@ export const execTool: Exec = (binary, args, opts) => new Promise<ExecResult>((r
   };
   child.on('error', (e) => { spawnError = e.message; setTimeout(() => finish(null, null), 50); });
   child.stdout!.on('data', (d: Buffer) => {
+    if (opts.discardStdout) { bytes += d.length; return; }
     if (truncated) return;
     if (bytes + d.length > opts.maxOutputBytes) { truncated = true; kill(); return; }
     chunks.push(d);

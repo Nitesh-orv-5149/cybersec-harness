@@ -108,6 +108,28 @@ export const ProjectConfigSchema = z.object({
       /** Explicit executable path; otherwise `schemathesis` then `st` are searched on PATH. Nothing is installed. */
       binary: z.string().optional(),
     }).default({}),
+    /** Secrets detection with Gitleaks. Reads files only; secret values are redacted by Gitleaks before anything is stored. */
+    secrets: z.object({
+      enabled: z.boolean().default(true),
+      /** Directories skipped in workspace mode, in addition to Gitleaks' own default allowlist (which already skips node_modules, lockfiles, images). */
+      exclude: z.array(z.string().regex(/^[^\s'"]+$/)).default(['dist', 'build', 'coverage', '.next', '.workbench']),
+      /** Files larger than this are skipped by Gitleaks (and reported as such in coverage). */
+      maxTargetMegabytes: z.number().int().min(1).max(500).default(10),
+      timeoutMs: z.number().int().min(10_000).max(60 * 60_000).default(300_000),
+      /** Explicit executable path; otherwise `gitleaks` is searched on PATH. Nothing is installed. */
+      binary: z.string().optional(),
+    }).default({}),
+    /** Infrastructure-as-code checks with Checkov. Runs offline: no Prisma Cloud API key is passed, guideline download and update checks are off. */
+    iac: z.object({
+      enabled: z.boolean().default(true),
+      /** Directories skipped when looking for IaC files and passed to Checkov as --skip-path. */
+      exclude: z.array(z.string().regex(/^[\w.@-]+$/)).default(['node_modules', '.git', 'dist', 'build', 'coverage', '.terraform', '.serverless', '.workbench']),
+      /** Checkov check ids to skip (e.g. CKV_DOCKER_2). Inline `checkov:skip` comments in the files are honoured as well. */
+      skipChecks: z.array(z.string().regex(/^[A-Z0-9_]+$/)).default([]),
+      timeoutMs: z.number().int().min(10_000).max(60 * 60_000).default(600_000),
+      /** Explicit executable path; otherwise `checkov` is searched on PATH. Nothing is installed. */
+      binary: z.string().optional(),
+    }).default({}),
   }).default({}),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

@@ -146,6 +146,10 @@ The **Security tools** tab groups the other scanners by what they examine. Each 
 | Category | Tool | What it examines | Finding source |
 |---|---|---|---|
 | API testing | Schemathesis | a running local copy of the app, driven by an OpenAPI schema | `api` |
+| Secrets detection | Gitleaks | project files (workspace mode) or every commit (history mode) | `secrets` |
+| Infrastructure checks | Checkov | Terraform, CloudFormation, Kubernetes, Helm, Kustomize, Dockerfiles, CI pipeline files, Serverless, ARM/Bicep | `iac` |
+
+Not integrated: OWASP ZAP, Nuclei, Syft/Grype and Semgrep (see Limitations).
 
 Rules shared by every category:
 - A run without a usable tool is `unavailable`, and one whose tool failed is `failed`. A category with nothing to scan is `not_applicable`. None of these has counts, so none of them can read as "0 issues".
@@ -187,6 +191,43 @@ Install it yourself, for example `pipx install schemathesis` (version 4.x, MIT l
 
 Operations that Schemathesis tested and that no longer fail move their findings to `not_currently_observed`.
 
+### Secrets detection (Gitleaks)
+
+Install it yourself (`brew install gitleaks`, `pacman -S gitleaks`, or a release binary; 8.19 or newer, MIT licence). The workbench looks for `gitleaks` on `PATH`, or uses `security.secrets.binary`. Nothing is sent anywhere and no app is started, so no authorisation step is needed.
+
+```jsonc
+"security": {
+  "secrets": {
+    "exclude": ["dist", "build", "coverage", ".next", ".workbench"],  // on top of Gitleaks' own allowlist (node_modules, lockfiles, binaries)
+    "maxTargetMegabytes": 10,
+    "timeoutMs": 300000
+  }
+}
+```
+
+- **Modes.** `workspace` runs `gitleaks dir` on the files as they are now. `history` runs `gitleaks git` on every commit and needs the project folder to be the repository root. Each mode only re-checks its own findings: a workspace run never marks a history finding as gone, and the reverse.
+- **Rules.** Gitleaks' default rules, or your `.gitleaks.toml` when the project has one (the generated config extends it). `.gitleaksignore` fingerprints and `gitleaks:allow` comments are honoured.
+- **Secret values are never stored.** Gitleaks runs with `--redact`, the raw report is deleted after reading, and only a sanitised copy is kept (author e-mails removed). If a value ever came back unredacted it would be withheld and the run notes would say so.
+- **Results.** Exit code 42 means leaks, 0 means none, anything else is a failure; the exit code and the report must agree or the run is not trusted. Gitleaks assigns no severity, so every match is shown as high with "severity as reported: not supplied". Locations are `file:line` (plus the commit in history mode) and link to the containing function when there is one.
+
+### Infrastructure checks (Checkov)
+
+Install it yourself (`pipx install checkov`, 3.x, Apache-2.0). The workbench looks for `checkov` on `PATH`, or uses `security.iac.binary`.
+
+```jsonc
+"security": {
+  "iac": {
+    "exclude": ["node_modules", ".git", "dist", "build", "coverage", ".terraform", ".serverless", ".workbench"],
+    "skipChecks": ["CKV_DOCKER_2"],   // inline `checkov:skip=` comments work too; both show as suppressed
+    "timeoutMs": 600000
+  }
+}
+```
+
+- **Not applicable is not clean.** The workbench first looks for IaC files itself. With none, the run is stored as `not_applicable` with what was looked for, no counts, and Checkov is not started.
+- **Only what exists is checked.** Checkov gets `--framework` with the detected frameworks only (never `secrets`, `sca_*` or `sast`). A detected framework that produced no result (Helm and Kustomize need the `helm` / `kustomize` binaries) or a file Checkov could not parse makes the run `partial`, and findings in those files are not marked as gone.
+- **Offline.** No Prisma Cloud key is passed (the scanner environment is an allow-list), `--skip-download` stops guideline downloads, `BC_SKIP_MAPPING` and `CKV_SKIP_PACKAGE_UPDATE_CHECK` stop the mapping and PyPI update calls, and proxy variables are removed.
+- **Results.** Each failed check keeps the check id (`CKV_AWS_24`), its name, the resource, the evaluated keys, the guideline link when present and up to 15 lines of the code block. Without a Prisma Cloud key Checkov reports no severity, so findings show `unknown` instead of a guessed level. With `--soft-fail`, a non-zero exit is a Checkov error and the run fails.
 
 ## Design decisions
 
@@ -229,6 +270,9 @@ npm test    # vitest: analyzer, graph queries, diff/classification, findings, sn
 # and runs the real tool too when `schemathesis` is on PATH
 cd packages/service && npx vitest run test/security-api.test.ts test/security-api.integration.test.ts
 
+# Secrets and IaC: unit tests use real Gitleaks 8.24.3 and Checkov 3.3.30 reports; the real-binary tests run
+# when the tools are on PATH or given explicitly
+GITLEAKS_BIN=$(which gitleaks) CHECKOV_BIN=$(which checkov) npx vitest run test/security-static.test.ts test/security-static.integration.test.ts
 
 # Optional: run every dependency scanner that is really installed against the vulnerable fixture (needs network)
 cd packages/service && WORKBENCH_REAL_SCANNERS=1 npx vitest run test/security-deps.test.ts -t "real scanners"
@@ -243,4 +287,6 @@ cd packages/service && WORKBENCH_REAL_SCANNERS=1 npx vitest run test/security-de
 - Scenarios cover only what you configure; untested pages can still regress.
 - The OSV.dev web API adapter needs only `security.allowNetwork: true` and outbound HTTPS to `api.osv.dev`; readiness probes it and shows `service unreachable` if it does not answer. Trivy has no hosted API, so it stays a local-binary option. The web adapter is tested against a fake `fetch` shaped like the documented responses, not yet against the live API.
 - Dependency scanning covers the root npm lockfile only. Other ecosystems and nested workspaces are detected and reported as not scanned. OSV-Scanner and Trivy adapters are tested against synthetic reports until they are run against real output.
+- Not integrated yet: OWASP ZAP and Nuclei (dynamic web/template scanning), Syft/Grype (SBOM and SBOM-based vulnerability scanning) and Semgrep (source-code rules).
+- Gitleaks and Checkov have been verified here on Linux with Gitleaks 8.24.3 and Checkov 3.3.30; other versions are accepted (Gitleaks 8.19+, Checkov 3.x) but have not been run.
 - The extension is a thin client and has been compiled but should be smoke-tested in your VS Code.

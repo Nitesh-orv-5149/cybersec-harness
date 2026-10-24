@@ -45,6 +45,10 @@ export interface ExecOptions {
   signal?: AbortSignal;
   /** strip proxy settings: the tool only talks to a loopback target */
   localOnly?: boolean;
+  /** Extra variables on top of the minimal scanner environment (tool switches only, never credentials). */
+  env?: Record<string, string>;
+  /** The tool writes its report to a file; stdout is counted but not kept, so it cannot hit maxOutputBytes. */
+  discardStdout?: boolean;
 }
 
 export type Exec = (binary: string, args: string[], opts: ExecOptions) => Promise<ExecResult>;

@@ -1,0 +1,18 @@
+# Deliberately misconfigured fixture: privileged container, no resource limits.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: fixture-api }
+  template:
+    metadata:
+      labels: { app: fixture-api }
+    spec:
+      containers:
+        - name: api
+          image: fixture/api:latest
+          securityContext:
+            privileged: true

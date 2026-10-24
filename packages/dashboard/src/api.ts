@@ -30,7 +30,7 @@ export interface Finding {
   _id: string; source: 'graph' | 'runtime' | 'dependency' | 'api' | 'web' | 'template' | 'code' | 'secrets' | 'iac'; category: string; classification: string; severity: 'high' | 'medium' | 'low' | 'info' | 'unknown';
   labels?: string[]; ids?: string[]; canonicalId?: string; cwe?: string[]; scanners?: string[]; pkg?: PackageInfo; references?: string[];
   potentialRegression?: boolean; confidenceNote?: string; resolution?: string;
-  ruleIds?: string[]; location?: { file?: string; line?: number; endLine?: number; url?: string; method?: string; operation?: string; param?: string };
+  ruleIds?: string[]; location?: { file?: string; line?: number; endLine?: number; url?: string; method?: string; operation?: string; param?: string; commit?: string; resource?: string };
   title: string; explanation: string[]; nodes: string[]; edges: string[]; paths: string[][];
   locations: { file: string; line: number }[]; evidence: Record<string, any>; suggestedNextStep: string;
   confidence: string; limitations: string[]; affectedByChange?: boolean; status?: 'open' | 'resolved' | 'not_currently_observed';

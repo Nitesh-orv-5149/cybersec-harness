@@ -18,6 +18,10 @@ export interface ObsLocation {
   method?: string;
   operation?: string;  // e.g. "GET /api/items/{id}"
   param?: string;
+  /** Git commit the finding was found in (history scans); absent for the working tree. */
+  commit?: string;
+  /** IaC resource address / name, as the tool reported it. */
+  resource?: string;
 }
 
 /** One rule/check result from one tool in one run. */

@@ -205,6 +205,30 @@ function ScanDetail({ f, ctx }: { f: Finding; ctx: Ctx }) {
           <dt>Code link</dt><dd className="small">{ev.linkHow ?? <span className="muted">none: no matching endpoint or function in the code graph</span>}</dd>
         </dl>
       </div>
+      {f.source === 'secrets' && (
+        <div className="section">
+          <h3>Secret match</h3>
+          <dl className="kv wide">
+            <dt>Match</dt><dd className="mono small">{ev.match ?? '—'} <span className="muted">(value redacted by Gitleaks; never stored)</span></dd>
+            <dt>Lines</dt><dd className="mono small">{ev.lines ?? '—'}{ev.columns ? ` · columns ${ev.columns}` : ''}</dd>
+            {ev.entropy != null && <><dt>Entropy</dt><dd className="mono small">{ev.entropy}</dd></>}
+            {ev.fingerprint && <><dt>Fingerprint</dt><dd className="mono small">{ev.fingerprint} <span className="muted">(add to .gitleaksignore to accept)</span></dd></>}
+            {ev.commit && <><dt>Commit</dt><dd className="mono small">{ev.commit}{ev.commitDate ? ` · ${new Date(ev.commitDate).toLocaleString()}` : ''}</dd></>}
+          </dl>
+        </div>
+      )}
+      {f.source === 'iac' && (
+        <div className="section">
+          <h3>Failed check</h3>
+          <dl className="kv wide">
+            <dt>Framework</dt><dd className="mono small">{ev.framework ?? '—'}</dd>
+            <dt>Resource</dt><dd className="mono small">{ev.resource ?? '—'}</dd>
+            {(ev.evaluatedKeys ?? []).length > 0 && <><dt>Evaluated</dt><dd className="mono small">{ev.evaluatedKeys.join(', ')}</dd></>}
+            {(f.references ?? []).length > 0 && <><dt>Guideline</dt><dd className="small">{f.references![0]}</dd></>}
+          </dl>
+          {ev.code && <pre className="log">{ev.code}</pre>}
+        </div>
+      )}
       {(ev.request || ev.response) && (
         <div className="section">
           <h3>Recorded request and response</h3>
