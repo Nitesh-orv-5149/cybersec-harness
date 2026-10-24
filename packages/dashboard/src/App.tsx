@@ -5,8 +5,9 @@ import { IssuesView } from './views/IssuesView';
 import { ReachabilityView } from './views/ReachabilityView';
 import { CompareView } from './views/CompareView';
 import { HistoryView } from './views/HistoryView';
+import { SecurityView } from './views/SecurityView';
 
-export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'history';
+export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'history';
 
 export interface Selection { nodeId: string | null; path: string[] | null; from?: string }
 
@@ -25,6 +26,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'issues', label: 'Findings' },
   { id: 'reach', label: 'Reachability' },
   { id: 'compare', label: 'Website comparison' },
+  { id: 'security', label: 'Dependency scan' },
   { id: 'history', label: 'History' },
 ];
 
@@ -85,6 +87,7 @@ export function App() {
         if (m.kind === 'findings') bump('findings');
         if (m.kind === 'browser') bump('browser');
         if (m.kind === 'baseline') { refreshGraph(); bump('browser'); }
+        if (m.kind === 'security') bump('security');
         bump('history');
         refreshStatus();
       };
@@ -122,6 +125,7 @@ export function App() {
               {t.label}
               {t.id === 'issues' && openFindings > 0 && <span className="count bad">{openFindings}</span>}
               {t.id === 'compare' && job && <span className="count">{job.status.replace('_', ' ')}</span>}
+              {t.id === 'security' && status.security?.dependencies?.job && <span className="count">scanning</span>}
             </button>
           ))}
         </nav>
@@ -131,6 +135,7 @@ export function App() {
         {tab === 'issues' && <IssuesView ctx={ctx} />}
         {tab === 'reach' && <ReachabilityView ctx={ctx} />}
         {tab === 'compare' && <CompareView ctx={ctx} />}
+        {tab === 'security' && <SecurityView ctx={ctx} />}
         {tab === 'history' && <HistoryView ctx={ctx} />}
       </main>
     </div>

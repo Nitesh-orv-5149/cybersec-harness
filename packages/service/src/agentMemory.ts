@@ -8,20 +8,27 @@ import {
   type MemoryKind,
 } from './store/agentMemory.js';
 
-const SECRET_KEY = /^(password|passwd|secret|token|api[_-]?key|authorization|cookie)$/i;
-
-/** Memory stores what agents saw and said, so credentials are stripped from every string before anything is written. */
-export function scrub<T>(v: T, depth = 0): T {
-  if (typeof v === 'string') return redact(v) as T;
-  if (v === null || typeof v !== 'object' || v instanceof Date || depth > 6) return v;
-  if (Array.isArray(v)) return v.map((x) => scrub(x, depth + 1)) as T;
-  return Object.fromEntries(
-    Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, SECRET_KEY.test(k) && typeof x === 'string' ? '***' : scrub(x, depth + 1)]),
-  ) as T;
-}
-
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 const bad = (errors: string[]) => fail(400, errors.join('; '));
+
+const SECRET_KEY = /(token|secret|passw(or)?d|api[_-]?key|authorization|cookie|credential|private[_-]?key)|^auth$/i;
+
+/**
+ * Deep-copy `value` with credentials removed, so secrets never reach the agent collections:
+ * strings go through redact() (URL creds, token=..., Bearer ...), and any value stored under a secret-looking key becomes '***'.
+ * Dates are kept; the input is never mutated.
+ */
+export function scrub<T>(value: T): T {
+  const walk = (v: unknown, key?: string): unknown => {
+    if (key !== undefined && SECRET_KEY.test(key) && v !== null && v !== undefined) return '***';
+    if (typeof v === 'string') return redact(v);
+    if (v instanceof Date) return v;
+    if (Array.isArray(v)) return v.map((x) => walk(x));
+    if (v !== null && typeof v === 'object') return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, walk(x, k)]));
+    return v;
+  };
+  return walk(value) as T;
+}
 
 export class AgentMemory {
   constructor(private readonly store: Store) {}
@@ -49,9 +56,9 @@ export class AgentMemory {
     } else {
       await runs.updateOne({ _id: runId as never }, { $max: { eventCount: seq } });
     }
-    const { seq: _omit, ...rest } = scrub(v.value);
+    const { seq: _omit, ...rest } = v.value;
     void _omit;
-    const doc = { _id: `${runId}:${seq}`, projectId, runId, seq, ...rest, at: new Date() };
+    const doc = { _id: `${runId}:${seq}`, projectId, runId, seq, ...scrub(rest), at: new Date() };
     try {
       await this.store.col('agent_events').insertOne(doc as never);
     } catch (e) {
@@ -72,7 +79,7 @@ export class AgentMemory {
     const finishedAt = new Date();
     const r = await runs.findOneAndUpdate(
       { _id: runId as never, projectId, status: 'running' },
-      { $set: { ...scrub(v.value), finishedAt } },
+      { $set: { ...v.value, finishedAt } },
       { returnDocument: 'after' },
     );
     if (!r) throw fail(409, 'run not found or already finished');
@@ -175,34 +182,6 @@ export class AgentMemory {
     return { memories, note: 'Memories are hints written by earlier runs or people. Scan results and human review always outrank them; check the evidence before relying on one.' };
   }
 
-  /**
-   * Read-only context pack for one finding or package: what the history already knows, so a run starts informed.
-   * Combines the finding, what each scanner observed over time, verification records, active memories and earlier agent steps.
-   * It is history, not proof: a fresh scan result or a human review always outranks it.
-   */
-  async context(projectId: string, q: { findingId?: string; packageName?: string }) {
-    if (!q.findingId && !q.packageName) throw bad(['query parameter finding or package is required']);
-    const finding = q.findingId ? await this.store.col('graph_findings').findOne({ _id: q.findingId as never, projectId }) : null;
-    if (q.findingId && !finding) throw fail(404, 'unknown finding');
-    const pkgName = q.packageName ?? (finding?.source === 'dependency' ? (finding.pkg?.name as string | undefined) : undefined);
-    const keys = [q.findingId, pkgName].filter((k): k is string => !!k);
-    const now = new Date();
-    const [observations, verification, memories, steps] = await Promise.all([
-      q.findingId ? this.store.col('security_observations').find({ projectId, findingId: q.findingId }).sort({ observedAt: -1 }).limit(50).toArray() : [],
-      q.findingId ? this.store.col('verification_records').find({ projectId, findingId: q.findingId }).sort({ at: -1 }).limit(20).toArray() : [],
-      this.store.col('agent_memories').find({
-        projectId, status: 'active', 'subject.key': { $in: keys },
-        $or: [{ expiresAt: { $exists: false } }, { expiresAt: { $gt: now } }],
-      }).sort({ updatedAt: -1 }).limit(20).toArray(),
-      q.findingId ? this.store.col('agent_events').find({ projectId, 'refs.findingId': q.findingId }).sort({ at: -1 }).limit(20).toArray() : [],
-    ]);
-    return {
-      subject: { findingId: q.findingId ?? null, packageName: pkgName ?? null },
-      finding, observations, verification, memories, earlierSteps: steps,
-      note: 'History, not proof. Scan results and human review outrank memories. Dependency scanners report that a vulnerable version is installed; they do not show the vulnerable code is reachable or exploitable.',
-    };
-  }
-
   async retire(projectId: string, memoryId: string) {
     const r = await this.store.col('agent_memories').updateOne({ _id: memoryId as never, projectId }, { $set: { status: 'retired', updatedAt: new Date() } });
     if (!r.matchedCount) throw fail(404, 'unknown memory');
@@ -234,6 +213,5 @@ export function registerAgentRoutes(app: Express, h: HandlerWrap, store: Store, 
     subjectKey: str(req.query.subject), kind: str(req.query.kind), text: str(req.query.q),
     includeUnverified: req.query.includeUnverified === 'true', limit: req.query.limit ? Number(req.query.limit) : undefined,
   }))));
-  app.get(`${base}/context`, route(h((req) => mem.context(projectOf(req), { findingId: str(req.query.finding), packageName: str(req.query.package) }))));
   app.post(`${base}/memories/:mid/retire`, route(h((req) => mem.retire(projectOf(req), String(req.params.mid)))));
 }

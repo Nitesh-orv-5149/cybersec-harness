@@ -415,7 +415,8 @@ export class ProjectSession extends EventEmitter {
       const { _id, ...rest } = d;
       await col.updateOne({ _id: _id as never }, {
         $set: { ...rest, projectId: this.id, status: 'open', lastSeenAt: now, lastSeenAnalysisRunId: ctx.analysisRunId ?? existing?.lastSeenAnalysisRunId ?? null, lastSeenBrowserRunId: ctx.browserRunId ?? existing?.lastSeenBrowserRunId ?? null, resolvedAt: null },
-        $setOnInsert: { firstSeenAt: now, firstSeenAnalysisRunId: ctx.analysisRunId ?? null, firstSeenBrowserRunId: ctx.browserRunId ?? null, review: { ...DEFAULT_REVIEW } },      }, { upsert: true });
+        $setOnInsert: { firstSeenAt: now, firstSeenAnalysisRunId: ctx.analysisRunId ?? null, firstSeenBrowserRunId: ctx.browserRunId ?? null, review: { ...DEFAULT_REVIEW } },
+      }, { upsert: true });
       if (!existing || existing.status === 'resolved') {
         await vr.insertOne({ _id: newId('ver') as never, projectId: this.id, findingId: d._id, action: existing ? 'reopened' : 'observed', at: now, analysisRunId: ctx.analysisRunId ?? null, browserRunId: ctx.browserRunId ?? null, result: d.classification, notes: d.title });
       }

@@ -10,7 +10,8 @@ export function ReachabilityView({ ctx }: { ctx: Ctx }) {
   const index = useMemo(() => (ctx.graph?.graph ? new Index(ctx.graph.graph) : null), [ctx.graph]);
   useEffect(() => {
     api.get<Finding[]>(`/api/projects/${ctx.projectId}/reachability`).then((r) => {
-      r.sort((a, b) => ({ high: 3, medium: 2, low: 1, info: 0 }[b.severity] - { high: 3, medium: 2, low: 1, info: 0 }[a.severity]));
+      const rank = { high: 3, medium: 2, unknown: 1.5, low: 1, info: 0 };
+      r.sort((a, b) => rank[b.severity] - rank[a.severity]);
       setItems(r);
       if (!current && r[0]) setCurrent(r[0]._id);
     }).catch(() => setItems([]));

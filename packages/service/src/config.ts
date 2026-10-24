@@ -62,6 +62,26 @@ export const ProjectConfigSchema = z.object({
     trigger: z.enum(['manual', 'on-save']).default('manual'),
     debounceMs: z.number().int().min(50).max(60_000).default(400),
   }).default({}),
+  security: z.object({
+    /** Scanners that contact remote services (advisory APIs, registries, DB downloads) run only when this is true. */
+    allowNetwork: z.boolean().default(false),
+    dependencies: z.object({
+      enabled: z.boolean().default(true),
+      /** first-available: run the first ready tool in `order` (falling back on failure); all-available: run every ready tool. */
+      mode: z.enum(['first-available', 'all-available']).default('first-available'),
+      order: z.array(z.enum(['osv-api', 'osv-scanner', 'npm-audit', 'trivy'])).min(1).default(['osv-api', 'npm-audit', 'osv-scanner', 'trivy']),
+      fallbackOnFailure: z.boolean().default(true),
+      includeDev: z.boolean().default(true),
+      timeoutMs: z.number().int().min(5_000).max(30 * 60_000).default(180_000),
+      maxOutputBytes: z.number().int().min(64 * 1024).max(256 * 1024 * 1024).default(32 * 1024 * 1024),
+      /** Explicit executable paths; otherwise PATH is searched. Nothing is ever downloaded. */
+      binaries: z.object({ 'osv-scanner': z.string().optional(), npm: z.string().optional(), trivy: z.string().optional() }).default({}),
+      /** Use a locally cached OSV database instead of api.osv.dev (osv-scanner --offline-vulnerabilities). */
+      osvOffline: z.boolean().default(false),
+      /** Use Trivy's cached DB without updating it (--skip-db-update --offline-scan). */
+      trivyOffline: z.boolean().default(false),
+    }).default({}),
+  }).default({}),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
