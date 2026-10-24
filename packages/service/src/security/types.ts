@@ -5,7 +5,7 @@ import type { ProjectConfig } from '../config.js';
 
 export type ScanCategory = 'dependency_vulns' | 'api_dast';
 export type ToolId = 'osv-api' | 'osv-scanner' | 'npm-audit' | 'trivy';
-export type ApiToolId = 'schemathesis';
+export type ApiToolId = 'schemathesis' | 'zap' | 'nuclei' | 'semgrep' | 'gitleaks' | 'checkov' | 'syft' | 'grype';
 export type AnyToolId = ToolId | ApiToolId;
 
 export type ReadinessState =

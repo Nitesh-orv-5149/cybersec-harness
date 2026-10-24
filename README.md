@@ -134,6 +134,60 @@ None of these shows that the vulnerable function itself is called.
 
 Fixture provenance (real vs synthetic reports) is listed in `packages/service/test/fixtures/deps/README.md`.
 
+## Security tools (API testing, web scanning, source code, secrets, infrastructure)
+
+The **Security tools** tab groups the other scanners by what they examine. Each category has its own panel with the following:
+- tool availability: status, version, executable and the hosts it contacts
+- a Run button, with an authorisation step for modes that send attack-style traffic
+- the latest run: coverage, per-tool status, exit code, duration, number of findings and the raw report
+- open findings
+- run history
+
+| Category | Tool | What it examines | Finding source |
+|---|---|---|---|
+| API testing | Schemathesis | a running local copy of the app, driven by an OpenAPI schema | `api` |
+
+Rules shared by every category:
+- A run without a usable tool is `unavailable`, and one whose tool failed is `failed`. A category with nothing to scan is `not_applicable`. None of these has counts, so none of them can read as "0 issues".
+- Each tool's result is stored as an immutable observation in `security_observations`, with the tool's own rule id, severity label, confidence and evidence. Findings in `graph_findings` merge observations with the same location and rule, and list every scanner that reported them.
+- Findings are linked to the code graph only by structure. A request path that matches a route links to its endpoint, handler and the sensitive calls it reaches. A `file:line` links to the function that contains it and the endpoints above it. A link is never presented as proof of exploitability.
+- A finding becomes `not_currently_observed` only when a tool that reported it ran to completion again and covered its location. Nothing is automatically marked `resolved`, and a finding reported again is flagged as a potential regression.
+
+### API testing (Schemathesis)
+
+Install it yourself, for example `pipx install schemathesis` (version 4.x, MIT licence). The workbench looks for `schemathesis` or `st` on `PATH`, or uses `security.api.binary`.
+
+```jsonc
+"security": {
+  "api": {
+    "allowActiveTesting": false,        // must be true before anything is sent; each run is also confirmed in the dashboard
+    "schema": { "source": "auto", "path": "openapi.json" },  // auto: this file if set, else derived from the code graph
+    "methods": ["GET", "HEAD", "OPTIONS"],   // add POST/PUT/PATCH/DELETE explicitly to test state-changing operations
+    "checks": ["not_a_server_error"],        // any Schemathesis check name
+    "phases": ["examples", "coverage", "fuzzing"],
+    "maxExamples": 30, "requestTimeoutSec": 5, "workers": 1, "rateLimit": "20/s", "seed": 7,
+    "headers": { "Authorization": "Bearer <test-account token>" },  // values are redacted in stored evidence
+    "timeoutMs": 600000
+  }
+}
+```
+
+**Target.** The only target is a local copy that the workbench snapshots from your workspace and starts on `127.0.0.1` with the approved `run` commands. You can't enter arbitrary URLs. Proxy variables are removed from the tool's environment.
+
+**Schema.** Without a schema file, the workbench builds OpenAPI 3.0 from the Express routes in the code graph:
+- Path parameters come from the route template, and query and body fields from what each handler reads directly (`req.query.x`, `const { id } = req.params`, `req.body`).
+- String inputs carry a few boundary examples (`''`, `'`, `"`, `0`, `-1`) for the examples phase.
+- Types and response contracts are unknown, so mostly server errors are detected.
+- Each operation keeps an `x-workbench-endpoint` link back to its graph node.
+
+**Results.** Schemathesis writes its JSON run report and NDJSON event stream to the run folder; both are stored as raw reports. Each failing check becomes one observation with the following:
+- the check name and code (for example `not_a_server_error` / `ST101`)
+- Schemathesis' own severity label
+- the first failing request and its response, with secret headers and query tokens redacted, plus an occurrence count
+
+Operations that Schemathesis tested and that no longer fail move their findings to `not_currently_observed`.
+
+
 ## Design decisions
 
 **Analysis.** One supported path, done properly: JavaScript/TypeScript via the TypeScript compiler API, Express-style routing (`app/router.METHOD`, `app.use(prefix, router)`, middleware). Adapters produce per-file facts; a language-agnostic linker resolves them. Adding Python means writing one adapter that emits the same facts. Edges exist only when a reference resolves; client URL matches, callbacks and name-inferred routers are labelled `inferred`. Unresolved project calls are counted and shown.
@@ -155,13 +209,13 @@ Fixture provenance (real vs synthetic reports) is listed in `packages/service/te
 | `source_snapshots` | contentHash, manifest, labels (baseline/candidate), storagePath | (projectId, contentHash) unique |
 | `graph_snapshots` | graphHash, sourceHash, parserVersion, counts, graph (or file ref if > 4 MB) | (projectId, graphHash) unique |
 | `analysis_runs` | trigger, status, files, sourceHash, diff, impact, summary | (projectId, startedAt) |
-| `graph_findings` | source (graph/runtime/dependency), classification, severity, paths, evidence, correlation, status, first/lastSeen; dependency findings add ids, pkg (version, ranges, fixed versions, use evidence), scanners | (projectId, status, severityRank), (projectId, source, pkg.name, pkg.version), (projectId, ids) |
+| `graph_findings` | source (graph/runtime/dependency/api/web/template/code/secrets/iac), category, ruleIds, location (file/line or method/url/operation), classification, severity, paths, evidence, correlation, status, first/lastSeen; dependency findings add ids, pkg (version, ranges, fixed versions, use evidence), scanners | (projectId, status, severityRank), (projectId, source, pkg.name, pkg.version), (projectId, ids) |
 | `browser_runs` | baseline/candidate snapshot ids + hashes, sides (status/log), status, coverageNotes, staleAtFinish | (projectId, startedAt) |
 | `browser_results` | side, scenario, viewport, assertions, console/network, apiRequests, assets, screenshot | (run, side, scenario, viewport) unique |
 | `comparisons` | items (classification, visual diff, regions), graphChanges, filesChanged, limitations | browserRunId unique |
 | `verification_records` | findingId, action (observed/reopened/verified_fixed/resolved_by_analysis/not_currently_observed/potential_regression/version_removed), evidence run | (projectId, findingId, at) |
-| `security_scan_runs` | category, status, policy, network, per-tool records (version, status, reason, exit, report ref + sha256), per-lockfile coverage, counts (null when nothing was scanned), lockfile hashes, staleAtFinish | (projectId, category, startedAt), (projectId, status) |
-| `security_observations` | immutable per-run tool observation: advisory id, aliases, package/version, published severity, range, fixed versions | deterministic `_id` (idempotent), (projectId, findingId, observedAt), (runId, tool) |
+| `security_scan_runs` | category (dependency_vulns, api_testing, …), kind, mode, active + authorization, target (local URL, snapshot id), status, policy, network, per-tool records (version, status, reason, exit, report ref + sha256), per-lockfile coverage, counts (null when nothing was scanned), lockfile hashes, staleAtFinish | (projectId, category, startedAt), (projectId, status) |
+| `security_observations` | immutable per-run tool observation: category, rule/advisory id, aliases, location, evidence, confidence, package/version, published severity, range, fixed versions | deterministic `_id` (idempotent), (projectId, findingId, observedAt), (runId, tool) |
 
 Screenshots, diffs and snapshot copies live under `WORKBENCH_DATA_DIR`; MongoDB stores references.
 
@@ -170,6 +224,11 @@ Screenshots, diffs and snapshot copies live under `WORKBENCH_DATA_DIR`; MongoDB 
 ```sh
 npm test    # vitest: analyzer, graph queries, diff/classification, findings, snapshots, dependency scanners,
             # plus integration suites against real MongoDB (WORKBENCH_TEST_MONGO, skipped if unreachable)
+
+# API testing: unit tests use real Schemathesis 4.32.4 reports; the integration suite starts the fixture app,
+# and runs the real tool too when `schemathesis` is on PATH
+cd packages/service && npx vitest run test/security-api.test.ts test/security-api.integration.test.ts
+
 
 # Optional: run every dependency scanner that is really installed against the vulnerable fixture (needs network)
 cd packages/service && WORKBENCH_REAL_SCANNERS=1 npx vitest run test/security-deps.test.ts -t "real scanners"

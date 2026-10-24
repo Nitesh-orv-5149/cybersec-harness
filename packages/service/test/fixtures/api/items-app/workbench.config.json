@@ -1,0 +1,9 @@
+{
+  "language": "javascript",
+  "analysis": { "include": ["src"], "exclude": ["node_modules"] },
+  "run": { "start": "node src/server.js", "portEnv": "PORT", "healthPath": "/health", "startTimeoutMs": 15000 },
+  "browser": { "scenarios": [] },
+  "security": {
+    "api": { "allowActiveTesting": true, "maxExamples": 25, "seed": 7 }
+  }
+}

@@ -169,6 +169,36 @@ export class Service {
       return this.store.col('security_observations').find({ projectId: s.id, findingId: req.params.fid }).sort({ observedAt: -1 }).limit(200).toArray();
     }));
 
+    // ---- other scan kinds: API testing, web scanning, templates, source code, secrets, IaC ----
+    const scanOf = (req: Request) => {
+      const sc = this.session(req).scans.get(req.params.kind as never);
+      if (!sc) throw Object.assign(new Error(`unknown scan kind '${req.params.kind}'`), { status: 404 });
+      return sc;
+    };
+    app.get('/api/projects/:id/security/kinds', h(async (req) => {
+      const s = this.session(req);
+      return Promise.all([...s.scans.values()].map(async (sc) => ({ ...sc.status(), tools: await sc.tools(req.query.refresh === '1') })));
+    }));
+    app.get('/api/projects/:id/security/kinds/:kind', h(async (req) => { const sc = scanOf(req); return { ...sc.status(), tools: await sc.tools(req.query.refresh === '1') }; }));
+    app.post('/api/projects/:id/security/kinds/:kind/runs', h(async (req, res) => {
+      const body = z.object({ confirmActive: z.boolean().optional(), mode: z.string().max(40).optional() }).parse(req.body ?? {});
+      const r = await scanOf(req).start(body, 'manual');
+      res.status(202);
+      return r;
+    }));
+    app.post('/api/projects/:id/security/kinds/:kind/cancel', h((req) => ({ cancelled: scanOf(req).cancel() })));
+    app.get('/api/projects/:id/security/kinds/:kind/runs', h(async (req) => {
+      const s = this.session(req);
+      const sc = scanOf(req);
+      return this.store.col('security_scan_runs').find({ projectId: s.id, category: sc.kind.category }, { projection: { readiness: 0, 'target.log': 0 } }).sort({ startedAt: -1 }).limit(30).toArray();
+    }));
+    app.get('/api/projects/:id/security/runs/:rid', h(async (req) => {
+      const s = this.session(req);
+      const run = await this.store.col('security_scan_runs').findOne({ _id: req.params.rid as never, projectId: s.id });
+      const observations = await this.store.col('security_observations').find({ runId: req.params.rid, projectId: s.id }).limit(2000).toArray();
+      return { run, observations };
+    }));
+
     app.post('/api/projects/:id/baseline', h(async (req) => this.session(req).markBaseline()));
 
     app.post('/api/projects/:id/approve-run', h(async (req) => {

@@ -27,9 +27,10 @@ export interface PackageInfo {
 }
 
 export interface Finding {
-  _id: string; source: 'graph' | 'runtime' | 'dependency'; category: string; classification: string; severity: 'high' | 'medium' | 'low' | 'info' | 'unknown';
+  _id: string; source: 'graph' | 'runtime' | 'dependency' | 'api' | 'web' | 'template' | 'code' | 'secrets' | 'iac'; category: string; classification: string; severity: 'high' | 'medium' | 'low' | 'info' | 'unknown';
   labels?: string[]; ids?: string[]; canonicalId?: string; cwe?: string[]; scanners?: string[]; pkg?: PackageInfo; references?: string[];
   potentialRegression?: boolean; confidenceNote?: string; resolution?: string;
+  ruleIds?: string[]; location?: { file?: string; line?: number; endLine?: number; url?: string; method?: string; operation?: string; param?: string };
   title: string; explanation: string[]; nodes: string[]; edges: string[]; paths: string[][];
   locations: { file: string; line: number }[]; evidence: Record<string, any>; suggestedNextStep: string;
   confidence: string; limitations: string[]; affectedByChange?: boolean; status?: 'open' | 'resolved' | 'not_currently_observed';
@@ -57,7 +58,14 @@ export const api = {
 export const artifactUrl = (projectId: string, rel: string | null | undefined) =>
   rel ? `/api/projects/${projectId}/artifacts/${rel.split('/').map(encodeURIComponent).join('/')}` : '';
 
-export const TOOL_LABEL: Record<string, string> = { 'osv-api': 'OSV.dev (web API)', 'osv-scanner': 'OSV-Scanner', 'npm-audit': 'npm audit', trivy: 'Trivy' };
+export const TOOL_LABEL: Record<string, string> = {
+  'osv-api': 'OSV.dev (web API)', 'osv-scanner': 'OSV-Scanner', 'npm-audit': 'npm audit', trivy: 'Trivy', grype: 'Grype', syft: 'Syft',
+  schemathesis: 'Schemathesis', zap: 'OWASP ZAP', nuclei: 'Nuclei', semgrep: 'Semgrep', gitleaks: 'Gitleaks', checkov: 'Checkov',
+};
+export const SOURCE_NAME: Record<string, string> = {
+  graph: 'Code analysis', runtime: 'Website run', dependency: 'Dependency scan', api: 'API testing', web: 'Dynamic web scan',
+  template: 'Template scan', code: 'Source-code scan', secrets: 'Secrets scan', iac: 'Infrastructure check',
+};
 
 export function shortId(id: string, n = 10) { return id.length > n ? id.slice(0, n) : id; }
 

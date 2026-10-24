@@ -30,6 +30,8 @@ const exec: Exec = async (_bin, args): Promise<ExecResult> => {
   env.calls++;
   return { ...base, exitCode: env.npmExit, stdout: env.npmStdout, stdoutBytes: env.npmStdout.length };
 };
+// No test may reach the real network: the OSV.dev API probe always fails here.
+const offlineFetch = (async () => { throw new Error('offline (test)'); }) as unknown as typeof fetch;
 const without = (pkg: string) => { const r = structuredClone(REAL); delete r.vulnerabilities[pkg]; return JSON.stringify(r); };
 
 beforeAll(async () => {
@@ -42,7 +44,7 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(root, 'workbench.config.json'), JSON.stringify({ analysis: { include: ['src'] }, security: { allowNetwork: true } }));
   store = new Store(URI, DB);
   await store.connect();
-  session = new ProjectSession(root, store, fs.mkdtempSync(path.join(os.tmpdir(), 'wb-deps-data-')), { exec, which });
+  session = new ProjectSession(root, store, fs.mkdtempSync(path.join(os.tmpdir(), 'wb-deps-data-')), { exec, which, fetch: offlineFetch });
   await session.init();
 }, 30_000);
 
@@ -68,7 +70,7 @@ describe.runIf(process.env.CI !== 'skip-mongo')('dependency scanning with MongoD
   it('reports real readiness: npm present, OSV-Scanner and Trivy missing', async () => {
     if (!reachable) return;
     const s = await session.deps.scanners(true);
-    expect(Object.fromEntries(s.map((x) => [x.tool, x.state]))).toEqual({ 'osv-api': 'needs_network', 'npm-audit': 'ready', 'osv-scanner': 'not_installed', trivy: 'not_installed' });
+    expect(Object.fromEntries(s.map((x) => [x.tool, x.state]))).toEqual({ 'osv-api': 'unreachable', 'npm-audit': 'ready', 'osv-scanner': 'not_installed', trivy: 'not_installed' });
   });
 
   it('persists a run, canonical findings, observations and graph links', async () => {

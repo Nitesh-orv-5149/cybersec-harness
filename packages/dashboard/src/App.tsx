@@ -6,8 +6,9 @@ import { ReachabilityView } from './views/ReachabilityView';
 import { CompareView } from './views/CompareView';
 import { HistoryView } from './views/HistoryView';
 import { SecurityView } from './views/SecurityView';
+import { ScansView } from './views/ScansView';
 
-export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'history';
+export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'scans' | 'history';
 
 export interface Selection { nodeId: string | null; path: string[] | null; from?: string }
 
@@ -27,6 +28,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'reach', label: 'Reachability' },
   { id: 'compare', label: 'Website comparison' },
   { id: 'security', label: 'Dependency scan' },
+  { id: 'scans', label: 'Security tools' },
   { id: 'history', label: 'History' },
 ];
 
@@ -136,6 +138,7 @@ export function App() {
         {tab === 'reach' && <ReachabilityView ctx={ctx} />}
         {tab === 'compare' && <CompareView ctx={ctx} />}
         {tab === 'security' && <SecurityView ctx={ctx} />}
+        {tab === 'scans' && <ScansView ctx={ctx} />}
         {tab === 'history' && <HistoryView ctx={ctx} />}
       </main>
     </div>

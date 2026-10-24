@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Ctx } from '../App';
-import { api, artifactUrl, timeAgo, TOOL_LABEL, type Finding } from '../api';
+import { api, artifactUrl, timeAgo, TOOL_LABEL, SOURCE_NAME, type Finding } from '../api';
+import { whereOf } from './ScansView';
 import { Index } from '../graphUtil';
 import { PathChain } from './GraphView';
 
 const CLASS_LABEL: Record<string, string> = {
   security_sensitive_path: 'Security-sensitive path',
   confirmed_test_failure: 'Confirmed test failure',
-  observed: 'Observed difference',
+  observed: 'Observed',
   potentially_related: 'Potentially related',
   unverified: 'Unverified',
   inconclusive: 'Inconclusive',
   scanner_detected: 'Scanner detected',
 };
-const SOURCE_LABEL = (f: Finding) => f.source === 'graph' ? 'Code analysis' : f.source === 'runtime' ? 'Website run' : `Dependency scan (${(f.scanners ?? []).map((t) => TOOL_LABEL[t] ?? t).join(', ')})`;
+const SOURCE_LABEL = (f: Finding) => (f.scanners?.length ? `${SOURCE_NAME[f.source] ?? f.source} (${f.scanners.map((t) => TOOL_LABEL[t] ?? t).join(', ')})` : SOURCE_NAME[f.source] ?? f.source);
+const SCAN_SOURCES = new Set(['api', 'web', 'template', 'code', 'secrets', 'iac']);
 const STATUS_LABEL: Record<string, string> = { open: 'open', resolved: 'resolved', not_currently_observed: 'not currently observed' };
 const safeHref = (u: string) => (/^https?:\/\//i.test(u) ? u : null);
 const ACTION_LABEL: Record<string, string> = {
@@ -23,7 +25,7 @@ const ACTION_LABEL: Record<string, string> = {
 
 export function IssuesView({ ctx }: { ctx: Ctx }) {
   const [status, setStatus] = useState<'open' | 'resolved' | 'not_currently_observed' | 'all'>('open');
-  const [source, setSource] = useState<'all' | 'graph' | 'runtime' | 'dependency'>('all');
+  const [source, setSource] = useState<string>('all');
   const [items, setItems] = useState<Finding[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [current, setCurrent] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export function IssuesView({ ctx }: { ctx: Ctx }) {
             <option value="open">Open</option><option value="not_currently_observed">Not currently observed</option><option value="resolved">Resolved</option><option value="all">All</option>
           </select>
           <select className="input" style={{ width: 'auto' }} value={source} onChange={(e) => setSource(e.target.value as any)} aria-label="Source">
-            <option value="all">All sources</option><option value="graph">Code analysis</option><option value="runtime">Website runs</option><option value="dependency">Dependency scans</option>
+            <option value="all">All sources</option>{Object.entries(SOURCE_NAME).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <span className="muted small">{shown.length}</span>
         </div>
@@ -93,6 +95,7 @@ function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[];
         <p className="muted small">First seen {timeAgo(f.firstSeenAt)} · last seen {timeAgo(f.lastSeenAt)} · confidence {f.confidence}{f.confidenceNote ? ` (${f.confidenceNote})` : ''}</p>
       </div>
       {f.source === 'dependency' && f.pkg && <DependencyDetail f={f} ctx={ctx} />}
+      {SCAN_SOURCES.has(f.source) && <ScanDetail f={f} ctx={ctx} />}
       <div className="section">
         <h3>What was found</h3>
         <ul className="explain">{f.explanation.map((e, i) => <li key={i}>{e}</li>)}</ul>
@@ -112,7 +115,7 @@ function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[];
       )}
       {paths.length > 0 && (
         <div className="section">
-          <h3>{f.source === 'graph' ? 'Reachability paths' : f.source === 'dependency' ? 'Endpoints whose code calls into this package (existing code graph)' : 'Dependency paths from what the scenario exercised to the changed code'}</h3>
+          <h3>{f.source === 'graph' ? 'Reachability paths' : f.source === 'dependency' ? 'Endpoints whose code calls into this package (existing code graph)' : SCAN_SOURCES.has(f.source) ? 'Code paths from the linked endpoint (existing code graph)' : 'Dependency paths from what the scenario exercised to the changed code'}</h3>
           {paths.map((p, i) => <PathChain key={i} path={p} index={index} ctx={ctx} changed={changed} />)}
           <button className="btn small" onClick={() => ctx.select({ nodeId: paths[0][paths[0].length - 1], path: paths[0], from: 'finding' }, 'graph')}>Show in graph</button>
         </div>
@@ -175,6 +178,48 @@ function DependencyDetail({ f, ctx }: { f: Finding; ctx: Ctx }) {
           <h3>Scanner observations</h3>
           <table className="tbl"><thead><tr><th>When</th><th>Tool</th><th>Advisory</th><th>Published severity</th><th>Run</th></tr></thead><tbody>
             {obs.slice(0, 20).map((o) => <tr key={o._id}><td className="muted">{timeAgo(o.observedAt)}</td><td>{TOOL_LABEL[o.tool] ?? o.tool} <span className="faint small">{o.toolVersion}</span></td><td className="mono small">{o.advisoryId}</td><td>{o.originalSeverity ?? <span className="muted">not supplied</span>}</td><td className="mono small muted">{o.runId}</td></tr>)}
+          </tbody></table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ScanDetail({ f, ctx }: { f: Finding; ctx: Ctx }) {
+  const [obs, setObs] = useState<any[] | null>(null);
+  useEffect(() => {
+    api.get<any[]>(`/api/projects/${ctx.projectId}/findings/${f._id}/observations`).then(setObs).catch(() => setObs(null));
+  }, [f._id, f.lastSeenAt]);
+  const ev = f.evidence ?? {};
+  return (
+    <>
+      <div className="section">
+        <h3>Scanner result</h3>
+        <dl className="kv wide">
+          <dt>Where</dt><dd className="mono">{whereOf(f)}</dd>
+          <dt>Rule</dt><dd className="mono">{(f.ruleIds ?? []).join(', ')}</dd>
+          {(f.ids ?? []).length > 0 && <><dt>Identifiers</dt><dd className="mono small">{f.ids!.join(', ')}</dd></>}
+          {(f.cwe ?? []).length > 0 && <><dt>CWE</dt><dd className="mono">{f.cwe!.join(', ')}</dd></>}
+          <dt>Severity</dt><dd>{(ev.severityByTool ?? []).map((s: any, i: number) => <span key={i} className="chip" style={{ marginRight: 4 }}>{TOOL_LABEL[s.tool] ?? s.tool}: {s.original ?? 'not supplied'}{s.confidence ? ` · confidence ${s.confidence}` : ''}</span>)}</dd>
+          <dt>Tools</dt><dd>{(f.scanners ?? []).map((t) => TOOL_LABEL[t] ?? t).join(', ')}</dd>
+          <dt>Code link</dt><dd className="small">{ev.linkHow ?? <span className="muted">none: no matching endpoint or function in the code graph</span>}</dd>
+        </dl>
+      </div>
+      {(ev.request || ev.response) && (
+        <div className="section">
+          <h3>Recorded request and response</h3>
+          {ev.request && <><p className="small muted">Request</p><pre className="log">{`${ev.request.method ?? ''} ${ev.request.path ?? ev.request.url ?? ''}\n${Object.entries(ev.request.headers ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n')}${ev.request.body ? `\n\n${ev.request.body}` : ''}`}</pre></>}
+          {ev.response && <><p className="small muted">Response</p><pre className="log">{`HTTP ${ev.response.status ?? ''}\n${Object.entries(ev.response.headers ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n')}${ev.response.body ? `\n\n${ev.response.body}` : ''}`}</pre></>}
+          {ev.occurrences > 1 && <p className="small muted">Seen {ev.occurrences} times in the run; the first occurrence is shown.</p>}
+        </div>
+      )}
+      {(ev.snippet || ev.match) && <div className="section"><h3>Evidence</h3><pre className="log">{ev.snippet ?? ev.match}</pre></div>}
+      {(f.references ?? []).length > 0 && <div className="section"><h3>References</h3><ul className="list">{f.references!.map((u) => { const h = safeHref(u); return <li key={u}>{h ? <a href={h} target="_blank" rel="noreferrer noopener">{u}</a> : <span className="mono">{u}</span>}</li>; })}</ul></div>}
+      {obs && obs.length > 0 && (
+        <div className="section">
+          <h3>Observations</h3>
+          <table className="tbl"><thead><tr><th>When</th><th>Tool</th><th>Rule</th><th>Reported severity</th><th>Run</th></tr></thead><tbody>
+            {obs.slice(0, 20).map((o) => <tr key={o._id}><td className="muted">{timeAgo(o.observedAt)}</td><td>{TOOL_LABEL[o.tool] ?? o.tool} <span className="faint small">{o.toolVersion}</span></td><td className="mono small">{o.ruleId}</td><td>{o.originalSeverity ?? <span className="muted">not supplied</span>}</td><td className="mono small muted">{o.runId}</td></tr>)}
           </tbody></table>
         </div>
       )}

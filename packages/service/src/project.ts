@@ -19,6 +19,9 @@ import { log } from './log.js';
 import { newId, sha256, shortHash } from './util.js';
 import { DependencyScanService } from './security/deps/service.js';
 import type { Exec, Which } from './security/types.js';
+import { ScanService } from './security/scan/service.js';
+import { SCAN_KINDS } from './security/scan/registry.js';
+import type { KindId, ManagedTarget } from './security/scan/types.js';
 
 export type BrowserRunStatus = 'pending' | 'building' | 'browser_running' | 'comparing' | 'completed' | 'failed' | 'inconclusive' | 'cancelled';
 
@@ -70,8 +73,9 @@ export class ProjectSession extends EventEmitter {
   private verifyQueued = false;
   lastBrowserRun: Record<string, unknown> | null = null;
   readonly deps: DependencyScanService;
+  readonly scans = new Map<KindId, ScanService>();
 
-  constructor(readonly root: string, private readonly store: Store, private readonly dataDir: string, scannerHooks: { exec?: Exec; which?: Which } = {}) {
+  constructor(readonly root: string, private readonly store: Store, private readonly dataDir: string, scannerHooks: { exec?: Exec; which?: Which; fetch?: typeof fetch } = {}) {
     super();
     this.root = fs.realpathSync(root);
     this.id = `prj_${shortHash(this.root, 16)}`;
@@ -84,6 +88,45 @@ export class ProjectSession extends EventEmitter {
       graphVersion: () => this.live?.graphVersion ?? null, sourceHash: () => this.live?.sourceHash ?? null,
       emit: (kind, payload) => this.emitState(kind, payload), ...scannerHooks,
     });
+    for (const k of SCAN_KINDS) {
+      this.scans.set(k.id, new ScanService(k, {
+        projectId: this.id, root: this.root, projectDir: this.projectDir, store: this.store,
+        cfg: () => this.cfg, graph: () => this.live?.graph ?? null,
+        graphVersion: () => this.live?.graphVersion ?? null, sourceHash: () => this.live?.sourceHash ?? null,
+        emit: (kind, payload) => this.emitState(kind, payload),
+        runApproved: () => this.runApprovedForTargets(),
+        startTarget: (signal) => this.startManagedTarget(signal),
+        ...scannerHooks,
+      }));
+    }
+  }
+
+  /** Dynamic scanners only ever test a copy of this project started with the approved run commands. */
+  runApprovedForTargets(): { ok: boolean; reason: string | null } {
+    if (this.loaded.error) return { ok: false, reason: this.loaded.error };
+    if (!this.cfg.run) return { ok: false, reason: `no "run" section in ${CONFIG_FILE}: the workbench needs build/start commands to start a local copy to test` };
+    if (!this.runApproval || this.runApproval.hash !== this.loaded.runHash) return { ok: false, reason: 'run commands have not been approved in the dashboard (or changed since approval)' };
+    return { ok: true, reason: null };
+  }
+
+  /** Snapshot the workspace, build and start it on a free loopback port, and hand back a stop() that cleans up. */
+  async startManagedTarget(signal: AbortSignal): Promise<ManagedTarget> {
+    const ok = this.runApprovedForTargets();
+    if (!ok.ok) throw new Error(ok.reason!);
+    const cfg = this.cfg;
+    const snap = captureSnapshot(this.root, cfg, path.join(this.projectDir, 'snapshots'));
+    await this.persistSnapshot(snap, 'security-target');
+    const work = prepareWorkspace(snap.storagePath, this.root, cfg, path.join(this.projectDir, 'work', newId('sectgt')));
+    try {
+      const app = await buildAndStart(work, cfg.run!, () => {}, signal);
+      return {
+        url: app.url, snapshotId: snap.snapshotId, contentHash: snap.contentHash, log: app.log,
+        stop: async () => { await app.stop(); fs.rmSync(work, { recursive: true, force: true }); },
+      };
+    } catch (e) {
+      fs.rmSync(work, { recursive: true, force: true });
+      throw e;
+    }
   }
 
   get cfg(): ProjectConfig { return this.loaded.config; }
@@ -113,6 +156,7 @@ export class ProjectSession extends EventEmitter {
     await this.persistProject();
     await this.loadPersistedState();
     await this.deps.loadLastRun();
+    for (const sc of this.scans.values()) await sc.loadLastRun();
     await this.runAnalysis([], 'initial', true);
   }
 
@@ -191,6 +235,7 @@ export class ProjectSession extends EventEmitter {
   async dispose() {
     this.browserJob?.abort.abort();
     this.deps.cancel();
+    for (const sc of this.scans.values()) sc.cancel();
     await this.stopMonitoring().catch(() => {});
   }
 
@@ -640,7 +685,7 @@ export class ProjectSession extends EventEmitter {
       verification: ready,
       lastBrowserRun: this.lastBrowserRun ? { id: this.lastBrowserRun._id, status: this.lastBrowserRun.status, candidateSnapshotId: this.lastBrowserRun.candidateSnapshotId, finishedAt: this.lastBrowserRun.finishedAt, error: this.lastBrowserRun.error ?? null } : null,
       store: { available: this.store.available, error: this.store.lastError },
-      security: { dependencies: this.deps.status() },
+      security: { dependencies: this.deps.status(), scans: Object.fromEntries([...this.scans].map(([k, v]) => [k, v.status()])) },
     };
   }
 

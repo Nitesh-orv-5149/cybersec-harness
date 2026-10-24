@@ -1,0 +1,139 @@
+{
+  "schemathesis_version": "4.32.4",
+  "command": "st run /tmp/workbench-data/redacted/openapi.json --url http://127.0.0.1:37407 --checks not_a_server_error --phases examples,coverage,fuzzing --max-examples 25 --request-timeout 5 --workers 1 --generation-database none --report json,ndjson --report-json-path /tmp/workbench-data/redacted/schemathesis-run.json --report-ndjson-path /tmp/workbench-data/redacted/schemathesis-events.ndjson --include-method GET --include-method HEAD --include-method OPTIONS --seed 7",
+  "seed": 7,
+  "started_at": "2026-10-24T10:28:02.619714+00:00",
+  "running_time": 2.2354201419999526,
+  "stop_reason": "completed",
+  "complete": true,
+  "exit_code": 1,
+  "operations": {
+    "total": 3,
+    "selected": 3,
+    "tested": 3,
+    "errored": 0,
+    "skipped": 0,
+    "skip_reasons": []
+  },
+  "phases": {
+    "examples": {
+      "status": "failure",
+      "skip_reason": null
+    },
+    "coverage": {
+      "status": "failure",
+      "skip_reason": null
+    },
+    "fuzzing": {
+      "status": "success",
+      "skip_reason": null
+    },
+    "stateful": {
+      "status": "skip",
+      "skip_reason": "disabled"
+    }
+  },
+  "test_cases": {
+    "generated": 91,
+    "with_failures": 1,
+    "unique_failures": 1,
+    "without_checks": 0,
+    "errored": 0
+  },
+  "failures": [
+    {
+      "type": "ServerError",
+      "code": "ST101",
+      "title": "Server error",
+      "severity": "critical",
+      "count": 1,
+      "operations": [
+        "GET /api/items/search"
+      ]
+    }
+  ],
+  "errors": [],
+  "baseline": null,
+  "filtered": 0,
+  "warnings": {
+    "missing_auth": [],
+    "base_url_mismatch": [],
+    "missing_test_data": [
+      "GET /api/items/{id}"
+    ],
+    "validation_mismatch": [],
+    "missing_deserializer": [],
+    "unused_openapi_auth": [],
+    "unsupported_regex": [],
+    "method_not_allowed": [],
+    "constants_extraction": [],
+    "unmatched_filter": [
+      "--include-method 'HEAD'",
+      "--include-method 'OPTIONS'"
+    ],
+    "unresolvable_reference": [],
+    "low_valid_rate": [],
+    "rate_limited": [],
+    "dictionary_mismatch": []
+  },
+  "valid_rates": {
+    "GET /api/items/{id}": {
+      "examples": {
+        "accepted": 0,
+        "unreachable": 4,
+        "conflicts": 0,
+        "rejected": 0
+      },
+      "coverage": {
+        "accepted": 0,
+        "unreachable": 4,
+        "conflicts": 0,
+        "rejected": 0
+      },
+      "fuzzing": {
+        "accepted": 0,
+        "unreachable": 25,
+        "conflicts": 0,
+        "rejected": 0
+      }
+    },
+    "GET /api/items/search": {
+      "examples": {
+        "accepted": 3,
+        "unreachable": 0,
+        "conflicts": 0,
+        "rejected": 0
+      },
+      "coverage": {
+        "accepted": 3,
+        "unreachable": 0,
+        "conflicts": 0,
+        "rejected": 0
+      },
+      "fuzzing": {
+        "accepted": 15,
+        "unreachable": 0,
+        "conflicts": 0,
+        "rejected": 0
+      }
+    },
+    "GET /health": {
+      "coverage": {
+        "accepted": 1,
+        "unreachable": 0,
+        "conflicts": 0,
+        "rejected": 0
+      },
+      "fuzzing": {
+        "accepted": 1,
+        "unreachable": 0,
+        "conflicts": 0,
+        "rejected": 0
+      }
+    }
+  },
+  "auth": {
+    "reauth_count": 0,
+    "reauth_broke": false
+  }
+}
