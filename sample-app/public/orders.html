@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orders</title>
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">Orders demo</a>
+    <button class="menu-toggle" id="menu-toggle" aria-expanded="false" aria-controls="site-nav">Menu</button>
+    <nav class="site-nav" id="site-nav">
+      <a href="/">Home</a>
+      <a href="/orders.html" id="nav-orders">Orders</a>
+      <a href="/users.html">Users</a>
+    </nav>
+  </header>
+  <main class="content">
+    <h1>Orders</h1>
+    <table class="orders" id="orders-table">
+      <thead><tr><th>#</th><th>Item</th><th>Total</th><th>Placed</th></tr></thead>
+      <tbody id="orders-body"><tr><td colspan="4">Loading…</td></tr></tbody>
+    </table>
+    <form id="order-form" class="order-form" novalidate>
+      <h2>Place an order</h2>
+      <label>Item <input name="item" id="order-item" autocomplete="off"></label>
+      <label>Amount (paise) <input name="cents" id="order-cents" inputmode="numeric"></label>
+      <button type="submit" class="primary-action" id="order-submit">Place order</button>
+      <p class="form-status" id="form-status" role="status"></p>
+    </form>
+  </main>
+  <script type="module" src="/js/nav.js"></script>
+  <script type="module" src="/js/orders.js"></script>
+</body>
+</html>

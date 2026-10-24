@@ -1,0 +1,15 @@
+{
+  "name": "sample-orders-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Labelled demo fixture: a small orders app used to exercise the workbench. Contains deliberate security-sensitive sinks.",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node src/server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "workbench",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Continuous code impact graph + live website verification (working name, not final branding)",
+  "workspaces": [
+    "packages/service",
+    "packages/dashboard",
+    "packages/extension"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/dashboard && npm run build -w packages/service && npm run build -w packages/extension",
+    "start": "node packages/service/dist/cli.js",
+    "demo": "npm run build && node packages/service/dist/cli.js --project ./sample-app",
+    "test": "npm test -w packages/service",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

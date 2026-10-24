@@ -1,0 +1,30 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: #1d232b; background: #f6f7f9; }
+a { color: #1d5bd6; }
+
+.site-header { display: flex; align-items: center; gap: 16px; padding: 12px 24px; background: #fff; border-bottom: 1px solid #dde1e6; }
+.brand { font-weight: 700; text-decoration: none; color: inherit; margin-right: auto; }
+.site-nav { display: flex; gap: 16px; }
+.menu-toggle { display: none; }
+
+.hero { max-width: 720px; margin: 64px auto; padding: 0 24px; }
+.hero h1 { font-size: 40px; margin: 0 0 12px; }
+.content { max-width: 880px; margin: 32px auto; padding: 0 24px; }
+
+.primary-action { display: inline-block; padding: 10px 18px; border-radius: 6px; border: 0; background: #1d5bd6; color: #fff; text-decoration: none; font: inherit; cursor: pointer; }
+
+.orders { width: 100%; border-collapse: collapse; background: #fff; }
+.orders th, .orders td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #e5e8ec; }
+
+.order-form { margin-top: 32px; display: grid; gap: 12px; max-width: 360px; }
+.order-form label { display: grid; gap: 4px; }
+.order-form input { padding: 8px; border: 1px solid #c4cad2; border-radius: 4px; font: inherit; }
+.form-status { min-height: 1.5em; margin: 0; }
+
+@media (max-width: 640px) {
+  .menu-toggle { display: inline-block; padding: 6px 12px; border: 1px solid #c4cad2; background: #fff; border-radius: 4px; }
+  .site-nav { display: none; position: absolute; top: 56px; left: 0; right: 0; flex-direction: column; padding: 12px 24px; background: #fff; border-bottom: 1px solid #dde1e6; }
+  .site-nav.is-open { display: flex; }
+  .hero h1 { font-size: 30px; }
+  .orders th:nth-child(4), .orders td:nth-child(4) { display: none; }
+}

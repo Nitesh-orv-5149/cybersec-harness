@@ -1,0 +1,88 @@
+{
+  "language": "javascript",
+  "analysis": {
+    "include": ["src", "public/js", "tests"],
+    "exclude": ["node_modules", "dist"]
+  },
+  "snapshot": {
+    "exclude": ["node_modules", "dist", ".git"],
+    "linkNodeModules": true
+  },
+  "run": {
+    "build": "npm run build",
+    "start": "node src/server.js",
+    "portEnv": "PORT",
+    "healthPath": "/health",
+    "buildTimeoutMs": 60000,
+    "startTimeoutMs": 20000,
+    "env": {}
+  },
+  "staticMap": { "/": "public" },
+  "browser": {
+    "viewports": [
+      { "name": "desktop", "width": 1280, "height": 800 },
+      { "name": "mobile", "width": 390, "height": 844 }
+    ],
+    "diffThreshold": 0.001,
+    "mask": [],
+    "scenarios": [
+      {
+        "id": "home",
+        "name": "Home page shows primary action",
+        "path": "/",
+        "steps": [
+          { "expectVisible": "#cta-orders" },
+          { "expectNoHorizontalOverflow": true }
+        ]
+      },
+      {
+        "id": "mobile-menu",
+        "name": "Mobile menu opens",
+        "path": "/",
+        "viewports": ["mobile"],
+        "steps": [
+          { "click": "#menu-toggle" },
+          { "expectVisible": "#nav-orders" }
+        ]
+      },
+      {
+        "id": "orders-list",
+        "name": "Orders list renders rupee totals",
+        "path": "/orders.html",
+        "steps": [
+          { "waitFor": "#orders-body tr:nth-child(3)" },
+          { "expectText": { "selector": "#orders-body", "contains": "₹8499.00" } },
+          { "expectNoHorizontalOverflow": true }
+        ]
+      },
+      {
+        "id": "order-invalid",
+        "name": "Empty order shows validation error",
+        "path": "/orders.html",
+        "viewports": ["desktop"],
+        "steps": [
+          { "waitFor": "#orders-body tr:nth-child(3)" },
+          { "click": "#order-submit" },
+          { "expectText": { "selector": "#form-status", "contains": "item is required" } }
+        ]
+      },
+      {
+        "id": "order-submit",
+        "name": "Valid order is placed",
+        "path": "/orders.html",
+        "viewports": ["desktop"],
+        "steps": [
+          { "waitFor": "#orders-body tr:nth-child(3)" },
+          { "fill": { "selector": "#order-item", "value": "Desk lamp" } },
+          { "fill": { "selector": "#order-cents", "value": "129900" } },
+          { "click": "#order-submit" },
+          { "expectText": { "selector": "#form-status", "contains": "Order placed" } }
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "trigger": "manual",
+    "debounceMs": 400
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "name": "code-impact-workbench",
+  "displayName": "Code Impact Workbench (working name)",
+  "description": "Continuously maps code dependencies and verifies the running website against a baseline. Thin client for the local analysis service.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "workbench.startMonitoring",
+        "title": "Workbench: Start monitoring this workspace"
+      },
+      {
+        "command": "workbench.stopMonitoring",
+        "title": "Workbench: Stop monitoring"
+      },
+      {
+        "command": "workbench.openDashboard",
+        "title": "Workbench: Open dashboard"
+      },
+      {
+        "command": "workbench.refresh",
+        "title": "Workbench: Re-analyse changed files"
+      },
+      {
+        "command": "workbench.fullRescan",
+        "title": "Workbench: Full rescan"
+      },
+      {
+        "command": "workbench.markBaseline",
+        "title": "Workbench: Mark current files as baseline"
+      },
+      {
+        "command": "workbench.verify",
+        "title": "Workbench: Compare current files with baseline"
+      }
+    ],
+    "configuration": {
+      "title": "Code Impact Workbench",
+      "properties": {
+        "workbench.serviceUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4317",
+          "description": "Local analysis service URL (loopback only)."
+        },
+        "workbench.sendUnsavedBuffers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send unsaved editor contents to the local service so the graph can show pending changes. Website runs never use unsaved buffers."
+        },
+        "workbench.bufferDebounceMs": {
+          "type": "number",
+          "default": 600
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/vscode": "1.85",
+    "@types/ws": "^8.18.2",
+    "typescript": "^5.9.3"
+  }
+}
