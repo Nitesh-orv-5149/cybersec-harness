@@ -42,11 +42,12 @@ export function collectFiles(root: string, cfg: ProjectConfig): { files: { rel: 
   return { files, totalBytes };
 }
 
-export function captureSnapshot(root: string, cfg: ProjectConfig, storeDir: string): SnapshotInfo {
+/** `scope` (the project id) keeps snapshot ids unique when several projects share one database. */
+export function captureSnapshot(root: string, cfg: ProjectConfig, storeDir: string, scope?: string): SnapshotInfo {
   const { files, totalBytes } = collectFiles(root, cfg);
   const manifest = files.map((f) => ({ path: f.rel, hash: sha256(f.data).slice(0, 16), size: f.data.length }));
   const contentHash = sha256(manifest.map((m) => `${m.path}\0${m.hash}`).join('\n'));
-  const snapshotId = `snap_${contentHash.slice(0, 16)}`;
+  const snapshotId = `snap_${(scope ? sha256(`${scope}|${contentHash}`) : contentHash).slice(0, 16)}`;
   const target = path.join(storeDir, snapshotId);
   if (fs.existsSync(path.join(target, 'manifest.json'))) {
     return { snapshotId, contentHash, manifest, fileCount: files.length, totalBytes, storagePath: target, reused: true };

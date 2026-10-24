@@ -55,7 +55,7 @@ describe('JS/TS adapter + linker on the sample app', () => {
 
   it('computes impact of a shared utility', () => {
     const imp = impactOf(new GraphIndex(g), ['fn:src/lib/format.js#formatCurrency']);
-    expect(imp.affectedEndpoints.sort()).toEqual(['ep:GET /api/orders', 'ep:GET /api/orders/:id', 'ep:GET /api/orders/:id/receipt', 'ep:POST /api/orders']);
+    expect(imp.affectedEndpoints.sort()).toEqual(['ep:GET /api/orders', 'ep:GET /api/orders/:id', 'ep:GET /api/orders/:id/cancel', 'ep:GET /api/orders/:id/export', 'ep:GET /api/orders/:id/receipt', 'ep:POST /api/orders']);
     expect(imp.affectedClientCode).toContain('fn:public/js/orders.js#loadOrders');
     expect(imp.affectedTests.length).toBe(2);
     expect(imp.changed).toEqual(['fn:src/lib/format.js#formatCurrency']);
@@ -130,5 +130,46 @@ describe('SQL sink detection', () => {
     const flagged = g.nodes.filter((n) => n.kind === 'sink').map((n) => String(n.meta.within).split('#')[1]).sort();
     expect(flagged).toEqual(['a', 'b', 'd']);
     expect(g.nodes.find((n) => n.kind === 'sink' && String(n.meta.within).endsWith('#d'))!.meta.directRequestInput).toBe(true);
+  });
+});
+
+describe('handler factories (Juice Shop style)', () => {
+  it('resolves app.get(path, wrap(factory())) to the function the factory returns, with its inputs and sinks', () => {
+    const dir = tmpProject({
+      'src/server.ts': [
+        "import express from 'express';",
+        "import { searchProducts } from './routes/search';",
+        "import * as utils from './lib/utils';",
+        "import * as orders from './routes/orders';",
+        'const app = express();',
+        "app.get('/rest/products/search', utils.asyncHandler(searchProducts()));",
+        "app.get('/rest/orders/:id', orders.getOrder({ verbose: true }));",
+        "app.get('/rest/plain', plain);",
+        'function plain(req, res) { res.send(req.query.x); }',
+      ].join('\n'),
+      'src/lib/utils.ts': 'export function asyncHandler(fn) { return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next); }\n',
+      'src/routes/search.ts': [
+        'export function searchProducts () {',
+        '  return (req, res, next) => {',
+        "    const criteria = req.query.q ?? '';",
+        '    db.query(`SELECT * FROM Products WHERE name LIKE \'%${criteria}%\'`).then((r) => res.json(r));',
+        '  };',
+        '}',
+      ].join('\n'),
+      'src/routes/orders.ts': 'export const getOrder = (opts) => async (req, res) => { const { id } = req.params; res.json({ id, opts }); };\n',
+    });
+    const g = analyzeDirectory({ ...opts(dir), include: ['src'] });
+    const ix = new GraphIndex(g);
+    const handlerOf = (ep: string) => g.edges.find((e) => e.kind === 'route_to_handler' && e.source === ep)?.target;
+
+    expect(handlerOf('ep:GET /rest/products/search')).toBe('fn:src/routes/search.ts#searchProducts.<returned>');
+    expect(ix.nodes.get('fn:src/routes/search.ts#searchProducts.<returned>')!.label).toBe('handler returned by searchProducts()');
+    expect(g.nodes.find((n) => n.id === 'ep:GET /rest/products/search')!.meta.inputs).toEqual([expect.objectContaining({ location: 'query', name: 'q' })]);
+    const sinks = [...ix.downstream(['ep:GET /rest/products/search']).keys()].filter((id) => ix.nodes.get(id)?.kind === 'sink');
+    expect(sinks.map((s) => ix.nodes.get(s)!.meta.sinkKind)).toContain('sql_dynamic');
+
+    expect(handlerOf('ep:GET /rest/orders/:id')).toBe('fn:src/routes/orders.ts#getOrder.<returned>');
+    expect(g.nodes.find((n) => n.id === 'ep:GET /rest/orders/:id')!.meta.inputs).toEqual([expect.objectContaining({ location: 'path', name: 'id' })]);
+    expect(handlerOf('ep:GET /rest/plain')).toBe('fn:src/server.ts#plain');
   });
 });

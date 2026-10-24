@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Ctx } from '../App';
 import { api, artifactUrl, timeAgo, ApiError } from '../api';
+import { WebSecurityPanel } from './WebSecurityPanel';
 
 const STATUS_TEXT: Record<string, string> = {
   pending: 'Preparing snapshots', building: 'Building and starting', browser_running: 'Running browser scenarios', comparing: 'Comparing results',
@@ -11,7 +12,34 @@ const CLASS_TEXT: Record<string, string> = {
   pre_existing_failure: 'Fails on both', inconclusive: 'Could not be compared', unchanged: 'No difference',
 };
 
+// Website changes (browser scenarios, screenshots) and security changes (nuclei) side by side, but never mixed:
+// a visual difference is not a vulnerability, and nuclei does not compare screenshots.
 export function CompareView({ ctx }: { ctx: Ctx }) {
+  const browserJob = ctx.status.browser.job;
+  const webJob = ctx.status.security?.web?.job;
+  return (
+    <div className="compare-grid">
+      <section className="compare-col" aria-label="Website changes">
+        <header className="col-head">
+          <h2>Website changes</h2>
+          <span className="faint small">visual, DOM and behaviour · Playwright</span>
+          {browserJob && <span className="chip st-analyzing">{String(browserJob.status).replace('_', ' ')}</span>}
+        </header>
+        <WebsiteChanges ctx={ctx} />
+      </section>
+      <section className="compare-col" aria-label="Security changes">
+        <header className="col-head">
+          <h2>Security changes</h2>
+          <span className="faint small">vulnerability scan of the running website · Nuclei</span>
+          {webJob && <span className="chip st-analyzing">scanning</span>}
+        </header>
+        <WebSecurityPanel ctx={ctx} />
+      </section>
+    </div>
+  );
+}
+
+function WebsiteChanges({ ctx }: { ctx: Ctx }) {
   const [runs, setRuns] = useState<any[] | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -33,9 +61,8 @@ export function CompareView({ ctx }: { ctx: Ctx }) {
 
   const current = runs?.find((r) => r._id === runId) ?? runs?.[0];
   return (
-    <div className="split">
-      <div className="master">
-        <div style={{ padding: 14, borderBottom: '1px solid var(--line)', display: 'grid', gap: 12 }}>
+    <div className="col-body">
+        <div className="col-controls">
           <div>
             <h3 style={{ marginTop: 0 }}>Baseline</h3>
             {s.baseline
@@ -67,18 +94,18 @@ export function CompareView({ ctx }: { ctx: Ctx }) {
           {!s.verification.ok && !job && <ul className="explain small muted">{s.verification.reasons.map((r: string) => <li key={r}>{r}</li>)}</ul>}
           {msg && <p className="small" role="status">{msg}</p>}
         </div>
-        {runs && !runs.length && <div className="empty small">No runs yet.</div>}
-        {runs?.map((r) => (
-          <button key={r._id} className="entry" aria-current={current?._id === r._id} onClick={() => setRunId(r._id)}>
-            <div className="row"><span className={`chip st-${r.status}`}>{STATUS_TEXT[r.status] ?? r.status}</span><span className="small faint">{timeAgo(r.startedAt)}</span></div>
-            <div className="small" style={{ marginTop: 4 }}>
-              {r.summary ? Object.entries(r.summary).map(([k, v]) => <span key={k} className={`chip st-${k}`} style={{ marginRight: 4 }}>{String(v)} {k.replace(/_/g, ' ')}</span>) : <span className="muted">{r.error ?? 'in progress'}</span>}
-            </div>
-            <div className="mono small faint" style={{ marginTop: 4 }}>{r.baselineSnapshotId?.slice(5, 13)} → {r.candidateSnapshotId?.slice(5, 13)} · {r.trigger}</div>
-          </button>
-        ))}
-      </div>
-      <div className="detail">{current ? <RunDetail ctx={ctx} runId={current._id} live={job?.runId === current._id} /> : <div className="empty">Run a comparison to see baseline and current pages side by side.</div>}</div>
+        {runs && runs.length > 0 && (
+          <label className="row small run-pick">Run
+            <select className="input" value={current?._id ?? ''} onChange={(e) => setRunId(e.target.value)} aria-label="Website comparison run">
+              {runs.map((r) => (
+                <option key={r._id} value={r._id}>
+                  {timeAgo(r.startedAt)} · {STATUS_TEXT[r.status] ?? r.status}{r.summary ? ` · ${Object.entries(r.summary).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ')}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div className="col-detail">{current ? <RunDetail ctx={ctx} runId={current._id} live={job?.runId === current._id} /> : <div className="empty">No website comparison yet. Mark a baseline, approve the run commands, then compare to see baseline and current pages side by side.</div>}</div>
     </div>
   );
 }

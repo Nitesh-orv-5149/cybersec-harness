@@ -8,6 +8,11 @@ import type { Graph, GraphNode } from '../../analyzer/types.js';
 export const SCHEMA_METHODS = ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 export type HttpMethod = (typeof SCHEMA_METHODS)[number];
 
+/** Boundary values sent in Schemathesis' examples phase for every string input of a graph-derived schema.
+ *  They probe input handling (empty values, quote characters, numeric edge cases), not specific exploits. */
+export const BOUNDARY_EXAMPLES: Record<string, string> = { empty: '', singleQuote: "'", doubleQuote: '"', zero: '0', negative: '-1' };
+const boundaryExamples = () => Object.fromEntries(Object.entries(BOUNDARY_EXAMPLES).map(([k, v]) => [k, { value: v }]));
+
 export interface OperationInfo {
   key: string;                 // "GET /api/items/{id}" — the label Schemathesis reports
   method: HttpMethod;
@@ -60,9 +65,9 @@ export function schemaFromGraph(graph: Graph, methods: string[]): PreparedSchema
     const conv = expressToOpenApi(String(ep.meta.path));
     if (!conv) { excluded.push({ key, reason: 'path uses wildcards or regex syntax that OpenAPI cannot express' }); continue; }
     const inputs = ((ep.meta.inputs as { location: string; name: string | null }[] | undefined) ?? []);
-    const params: Record<string, unknown>[] = conv.params.map((n) => ({ name: n, in: 'path', required: true, schema: { type: 'string' } }));
+    const params: Record<string, unknown>[] = conv.params.map((n) => ({ name: n, in: 'path', required: true, schema: { type: 'string', minLength: 1 }, examples: Object.fromEntries(Object.entries(boundaryExamples()).filter(([k]) => k !== 'empty')) }));
     for (const q of inputs.filter((i) => i.location === 'query' && i.name)) {
-      if (!params.some((p) => p.name === q.name && p.in === 'query')) params.push({ name: q.name, in: 'query', required: false, schema: { type: 'string' } });
+      if (!params.some((p) => p.name === q.name && p.in === 'query')) params.push({ name: q.name, in: 'query', required: false, schema: { type: 'string' }, examples: boundaryExamples() });
     }
     const op: Record<string, unknown> = {
       operationId: `${method.toLowerCase()}_${conv.path.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'root'}`,
@@ -89,6 +94,7 @@ export function schemaFromGraph(graph: Graph, methods: string[]): PreparedSchema
     notes: [
       'Schema derived from Express routes in the code graph. Parameter and body types are unknown (any value is allowed), and only inputs read directly in the handler are listed.',
       'No response contracts are known, so only checks that need no schema (such as not_a_server_error) are meaningful.',
+      `String inputs carry boundary examples (${Object.values(BOUNDARY_EXAMPLES).map((v) => JSON.stringify(v)).join(', ')}) that the examples phase sends in addition to generated values.`,
     ],
   };
 }

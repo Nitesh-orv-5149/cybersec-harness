@@ -1,6 +1,7 @@
 // JavaScript / TypeScript adapter built on the TypeScript compiler API (AST, not regex).
 // Supported framework path: Express-style routers (app/router.get|post|... and app.use(prefix, router)).
 import ts from 'typescript';
+import { RETURNED_SUFFIX } from './types.js';
 import type {
   CallFact, CalleeRef, DeclFact, FileFacts, ImportBinding, LanguageAdapter, ParseOptions,
   RenderFact, RequestFact, RequestInputFact, RouteFact, SinkFact, SinkKind,
@@ -259,6 +260,18 @@ export const jsAdapter: LanguageAdapter = {
       facts.requests.push({ from: current()?.qname ?? null, url, method, line: line(call) } satisfies RequestFact);
     };
 
+    // `wrap(handler)`, `wrap(makeHandler())` and `makeHandler(opts)` as the last route argument.
+    // A call whose only argument is itself a function reference or call is treated as a wrapper (asyncHandler, catchAsync, ...).
+    const handlerFromCall = (call: ts.CallExpression, depth = 0): RouteFact['handler'] => {
+      if (depth > 3) return null;
+      const only = call.arguments.length === 1 ? call.arguments[0]! : null;
+      if (only && ts.isCallExpression(only)) return handlerFromCall(only, depth + 1);
+      if (only && ts.isIdentifier(only)) return { kind: 'ident', name: only.text };
+      if (only && ts.isPropertyAccessExpression(only) && ts.isIdentifier(only.expression)) return { kind: 'member', object: only.expression.text, prop: only.name.text };
+      const ref = calleeRef(call.expression);
+      return ref.kind === 'other' ? null : { kind: 'factory', ref };
+    };
+
     const handleRouteCall = (call: ts.CallExpression): boolean => {
       const expr = call.expression;
       if (!ts.isPropertyAccessExpression(expr) || !ts.isIdentifier(expr.expression)) return false;
@@ -281,7 +294,10 @@ export const jsAdapter: LanguageAdapter = {
         if (last) {
           if (ts.isIdentifier(a)) handler = { kind: 'ident', name: a.text };
           else if (ts.isPropertyAccessExpression(a) && ts.isIdentifier(a.expression)) handler = { kind: 'member', object: a.expression.text, prop: a.name.text };
-          else if (isFunctionLike(a)) {
+          else if (ts.isCallExpression(a)) {
+            handler = handlerFromCall(a);
+            visit(a);
+          } else if (isFunctionLike(a)) {
             const q = addDecl(`route ${method.toUpperCase()} ${path}`, 'handler', a, a);
             handler = { kind: 'inline', qname: q };
             withDecl(q, paramNames(a), a.body);
@@ -346,7 +362,23 @@ export const jsAdapter: LanguageAdapter = {
       }
     };
 
+    // A function returned by the current declaration (`return (req, res) => {...}` or `() => (req, res) => {...}`)
+    // gets its own declaration, so handler factories resolve to the function that actually handles the request.
+    const returnedFn = (n: ts.Node): ts.SignatureDeclarationBase & { body?: ts.Node } | null => {
+      const cur = current();
+      if (!cur || cur.qname.endsWith(RETURNED_SUFFIX)) return null;
+      if (ts.isReturnStatement(n) && n.expression && isFunctionLike(n.expression)) return n.expression as never;
+      if (isFunctionLike(n) && n.parent && ts.isArrowFunction(n.parent) && n.parent.body === n) return n as never;
+      return null;
+    };
+
     const visit = (n: ts.Node): void => {
+      const ret = returnedFn(n);
+      if (ret) {
+        const q = addDecl(`${current()!.qname}${RETURNED_SUFFIX}`, 'function', ret, ret);
+        withDecl(q, paramNames(ret), ret.body);
+        return;
+      }
       checkRequestInput(n);
       if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && isStringBuild(n.initializer)) {
         builtStrings.set(`${current()?.qname ?? ''}|${n.name.text}`, n.initializer);

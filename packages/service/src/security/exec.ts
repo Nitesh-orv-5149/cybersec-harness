@@ -44,10 +44,11 @@ export const execTool: Exec = (binary, args, opts) => new Promise<ExecResult>((r
   let truncated = false;
   let timedOut = false;
   let cancelled = false;
-  const stderr = new OutputBuffer(8 * 1024);
+  const tail = opts.stderrTailBytes ?? 4000;
+  const stderr = new OutputBuffer(Math.max(8 * 1024, tail * 2));
   let child;
   try {
-    child = spawn(binary, args, { cwd: opts.cwd, env: opts.localOnly ? localOnlyEnv() : scannerEnv(), detached: true, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+    child = spawn(binary, args, { cwd: opts.cwd, env: { ...(opts.localOnly ? localOnlyEnv() : scannerEnv()), ...(opts.extraEnv ?? {}) }, detached: true, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
   } catch (e) {
     resolve({ exitCode: null, signal: null, stdout: '', stdoutBytes: 0, stdoutTruncated: false, stderrTail: '', timedOut: false, cancelled: false, spawnError: String((e as Error).message ?? e), durationMs: 0 });
     return;
@@ -60,6 +61,7 @@ export const execTool: Exec = (binary, args, opts) => new Promise<ExecResult>((r
   const timer = setTimeout(() => { timedOut = true; kill(); }, opts.timeoutMs);
   const onAbort = () => { cancelled = true; kill(); };
   opts.signal?.addEventListener('abort', onAbort, { once: true });
+  if (opts.signal?.aborted) onAbort(); // cancelled before the process started
   let spawnError: string | null = null;
   let settled = false;
   const finish = (code: number | null, sig: string | null) => {
@@ -69,16 +71,18 @@ export const execTool: Exec = (binary, args, opts) => new Promise<ExecResult>((r
     opts.signal?.removeEventListener('abort', onAbort);
     resolve({
       exitCode: code, signal: sig, stdout: Buffer.concat(chunks).toString('utf8'), stdoutBytes: bytes, stdoutTruncated: truncated,
-      stderrTail: redact(stderr.toString()).slice(-4000), timedOut, cancelled, spawnError, durationMs: Date.now() - started,
+      stderrTail: redact(stderr.toString()).slice(-tail), timedOut, cancelled, spawnError, durationMs: Date.now() - started,
     });
   };
   child.on('error', (e) => { spawnError = e.message; setTimeout(() => finish(null, null), 50); });
   child.stdout!.on('data', (d: Buffer) => {
+    if (opts.discardStdout) { bytes += d.length; opts.onStdout?.(d.toString('utf8')); return; }
     if (truncated) return;
     if (bytes + d.length > opts.maxOutputBytes) { truncated = true; kill(); return; }
     chunks.push(d);
     bytes += d.length;
+    opts.onStdout?.(d.toString('utf8'));
   });
-  child.stderr!.on('data', (d: Buffer) => stderr.push(d.toString('utf8')));
+  child.stderr!.on('data', (d: Buffer) => { const t = d.toString('utf8'); stderr.push(t); opts.onStderr?.(t); });
   child.on('close', (code, sig) => finish(code, sig));
 });

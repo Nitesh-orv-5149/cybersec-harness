@@ -9,7 +9,7 @@ export class StoreUnavailableError extends Error {
 export const COLLECTIONS = [
   'projects', 'file_events', 'source_snapshots', 'graph_snapshots', 'analysis_runs',
   'graph_findings', 'browser_runs', 'browser_results', 'comparisons', 'verification_records',
-  'security_scan_runs', 'security_observations', 'agent_events',
+  'security_scan_runs', 'security_observations', 'agent_events', 'web_endpoints', 'web_scan_cache',
 ] as const;
 export type CollectionName = (typeof COLLECTIONS)[number];
 
@@ -100,6 +100,14 @@ export class Store {
       db.collection('security_observations').createIndex({ runId: 1, tool: 1 }),
       db.collection('security_observations').createIndex({ projectId: 1, 'package.name': 1, advisoryId: 1 }),
       db.collection('agent_events').createIndex({ projectId: 1, at: -1 }),
+      db.collection('security_observations').createIndex({ runId: 1, side: 1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, source: 1, 'web.scopeKey': 1, status: 1 }),
+      // Incremental web scanning (security/web/incremental.ts). _id is a hash of (project, scope, input), so a point
+      // lookup is by _id; a scan loads a whole scope with one indexed query. The TTL index drops cache buckets whose
+      // newest entry has expired (e.g. a route that was removed); lookups still check each entry's own expiry.
+      db.collection('web_endpoints').createIndex({ projectId: 1, scope: 1, kind: 1 }),
+      db.collection('web_scan_cache').createIndex({ projectId: 1, scope: 1 }),
+      db.collection('web_scan_cache').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     ]);
   }
 

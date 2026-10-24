@@ -1,0 +1,22 @@
+id: workbench-debug-page
+
+info:
+  name: Workbench test debug page
+  author: workbench
+  severity: low
+  description: Test-only template. Matches a debug page that only the "vulnerable" mode of the test server serves.
+  tags: workbench-test,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/debug"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "WORKBENCH-DEBUG-ENABLED"
+      - type: status
+        status:
+          - 200

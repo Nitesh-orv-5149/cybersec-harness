@@ -1,0 +1,15 @@
+id: unsafe-raw-put
+info:
+  name: Raw PUT
+  severity: low
+  tags: exposure
+http:
+  - raw:
+      - |
+        PUT /upload.txt HTTP/1.1
+        Host: {{Hostname}}
+
+        hello
+    matchers:
+      - type: status
+        status: [201]

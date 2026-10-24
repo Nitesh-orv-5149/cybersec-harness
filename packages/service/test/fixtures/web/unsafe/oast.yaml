@@ -1,0 +1,13 @@
+id: unsafe-oast
+info:
+  name: OOB
+  severity: high
+  tags: misconfig
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?u={{interactsh-url}}"
+    matchers:
+      - type: word
+        part: interactsh_protocol
+        words: ["http"]

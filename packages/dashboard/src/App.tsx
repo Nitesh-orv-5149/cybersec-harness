@@ -7,8 +7,9 @@ import { CompareView } from './views/CompareView';
 import { HistoryView } from './views/HistoryView';
 import { SecurityView } from './views/SecurityView';
 import { AgentView } from './views/AgentView';
+import { ScansView } from './views/ScansView';
 
-export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'agent' | 'history';
+export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'scans' | 'agent' | 'history';
 
 export interface Selection { nodeId: string | null; path: string[] | null; from?: string }
 
@@ -28,6 +29,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'reach', label: 'Reachability' },
   { id: 'compare', label: 'Website comparison' },
   { id: 'security', label: 'Dependency scan' },
+  { id: 'scans', label: 'Security tools' },
   { id: 'agent', label: 'AI agent' },
   { id: 'history', label: 'History' },
 ];
@@ -90,6 +92,7 @@ export function App() {
         if (m.kind === 'browser') bump('browser');
         if (m.kind === 'baseline') { refreshGraph(); bump('browser'); }
         if (m.kind === 'security') bump('security');
+        if (m.kind === 'websec') bump('websec');
         if (m.kind === 'agent') bump('agent');
         bump('history');
         refreshStatus();
@@ -120,6 +123,7 @@ export function App() {
       <div>
         {!status.store.available && <div className="banner">MongoDB is unavailable ({status.store.error ?? 'no connection'}). The live graph still updates; history, findings and verification are paused until it reconnects.</div>}
         {status.config.error && <div className="banner">{status.config.error}</div>}
+        {(status.config.warnings ?? []).map((w: string, i: number) => <div key={i} className="banner" style={{ opacity: 0.85 }}>{w}</div>)}
         {status.analysis.status === 'failed' && <div className="banner">Last analysis failed: {status.analysis.error}. The graph shown is from the previous successful analysis.</div>}
         {status.unsavedBuffers.length > 0 && <div className="banner warn">Unsaved editor changes in {status.unsavedBuffers.join(', ')} are reflected in the graph (dashed outline) but not in any website run.</div>}
         <nav className="tabs" role="tablist">
@@ -128,7 +132,9 @@ export function App() {
               {t.label}
               {t.id === 'issues' && openFindings > 0 && <span className="count bad">{openFindings}</span>}
               {t.id === 'compare' && job && <span className="count">{job.status.replace('_', ' ')}</span>}
+              {t.id === 'compare' && !job && status.security?.web?.job && <span className="count">security scan</span>}
               {t.id === 'security' && status.security?.dependencies?.job && <span className="count">scanning</span>}
+              {t.id === 'scans' && (status.security?.web?.job || Object.values(status.security?.scans ?? {}).some((k: any) => k?.job)) && <span className="count">scanning</span>}
             </button>
           ))}
         </nav>
@@ -139,6 +145,7 @@ export function App() {
         {tab === 'reach' && <ReachabilityView ctx={ctx} />}
         {tab === 'compare' && <CompareView ctx={ctx} />}
         {tab === 'security' && <SecurityView ctx={ctx} />}
+        {tab === 'scans' && <ScansView ctx={ctx} />}
         {tab === 'agent' && <AgentView ctx={ctx} />}
         {tab === 'history' && <HistoryView ctx={ctx} />}
       </main>

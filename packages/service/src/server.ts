@@ -167,6 +167,50 @@ export class Service {
       return { run, observations };
     }));
 
+    // ---- web security scanning with nuclei (Website comparison → Security changes). Every scan needs explicit confirmation. ----
+    app.get('/api/projects/:id/security/web', h(async (req) => this.session(req).web.overview(req.query.refresh === '1')));
+
+    app.post('/api/projects/:id/security/web/scans', h(async (req, res) => {
+      const body = z.object({
+        mode: z.enum(['snapshots', 'url']),
+        url: z.string().max(2048).optional(),
+        // The dashboard sends this only after the user confirmed that HTTP requests will be sent to the target.
+        confirm: z.literal(true, { errorMap: () => ({ message: 'confirm must be true: every scan must be confirmed explicitly' }) }),
+        trigger: z.enum(['manual']).default('manual'),
+        profile: z.enum(['quick', 'standard', 'full']).optional(),
+        // Ignore the incremental cache for this scan (every template runs on every input; the cache is refreshed).
+        fullScan: z.boolean().optional(),
+      }).refine((b) => b.mode !== 'url' || !!b.url, { message: 'url is required in url mode', path: ['url'] }).parse(req.body ?? {});
+      const r = await this.session(req).web.start(body);
+      res.status(r.status === 'unavailable' ? 409 : 202);
+      return r;
+    }));
+
+    // Downloads/updates the public nuclei-templates (`nuclei -ut`). Network access; only on explicit confirmation.
+    app.post('/api/projects/:id/security/web/templates/update', h(async (req, res) => {
+      z.object({ confirm: z.literal(true, { errorMap: () => ({ message: 'confirm must be true: downloading templates must be confirmed explicitly' }) }) }).parse(req.body ?? {});
+      const r = await this.session(req).web.updateTemplates();
+      res.status(202);
+      return r;
+    }));
+
+    app.post('/api/projects/:id/security/web/scans/cancel', h((req) => ({ cancelled: this.session(req).web.cancel() })));
+
+    app.get('/api/projects/:id/security/web/scans', h(async (req) => {
+      const s = this.session(req);
+      return this.store.col('security_scan_runs').find({ projectId: s.id, category: 'web_dast' }, { projection: { 'templateSet.templateIds': 0, 'templateSet.rejectedSample': 0, 'sides.baseline.stderrTail': 0, 'sides.candidate.stderrTail': 0, 'sides.target.stderrTail': 0, 'sides.baseline.appLog': 0, 'sides.candidate.appLog': 0 } }).sort({ startedAt: -1 }).limit(30).toArray();
+    }));
+
+    app.get('/api/projects/:id/security/web/scans/:rid', h(async (req) => {
+      const s = this.session(req);
+      const run = await this.store.col('security_scan_runs').findOne({ _id: req.params.rid as never, projectId: s.id, category: 'web_dast' }, { projection: { 'templateSet.templateIds': 0 } });
+      if (!run) throw Object.assign(new Error('scan not found'), { status: 404 });
+      const observations = await this.store.col('security_observations').find({ runId: req.params.rid, projectId: s.id }).limit(5000).toArray();
+      const ids = [...new Set([...(run.findingIds ?? []), ...(run.comparison?.absent ?? []), ...(run.comparison?.baseline ?? []), ...observations.map((o) => o.findingId)])];
+      const findings = await this.store.col('graph_findings').find({ projectId: s.id, _id: { $in: ids as never[] } }).toArray();
+      return { run, observations, findings };
+    }));
+
     app.get('/api/projects/:id/security/summary', h(async (req) => this.store.dependencySummary(this.session(req).id)));
 
     // ---- AI agent activity log (the LLM orchestrator reports its decisions and tool runs here) ----
@@ -205,6 +249,36 @@ export class Service {
     app.get('/api/projects/:id/findings/:fid/observations', h(async (req) => {
       const s = this.session(req);
       return this.store.col('security_observations').find({ projectId: s.id, findingId: req.params.fid }).sort({ observedAt: -1 }).limit(200).toArray();
+    }));
+
+    // ---- other scan kinds: API testing, web scanning, templates, source code, secrets, IaC ----
+    const scanOf = (req: Request) => {
+      const sc = this.session(req).scans.get(req.params.kind as never);
+      if (!sc) throw Object.assign(new Error(`unknown scan kind '${req.params.kind}'`), { status: 404 });
+      return sc;
+    };
+    app.get('/api/projects/:id/security/kinds', h(async (req) => {
+      const s = this.session(req);
+      return Promise.all([...s.scans.values()].map(async (sc) => ({ ...sc.status(), tools: await sc.tools(req.query.refresh === '1') })));
+    }));
+    app.get('/api/projects/:id/security/kinds/:kind', h(async (req) => { const sc = scanOf(req); return { ...sc.status(), tools: await sc.tools(req.query.refresh === '1') }; }));
+    app.post('/api/projects/:id/security/kinds/:kind/runs', h(async (req, res) => {
+      const body = z.object({ confirmActive: z.boolean().optional(), mode: z.string().max(40).optional() }).parse(req.body ?? {});
+      const r = await scanOf(req).start(body, 'manual');
+      res.status(202);
+      return r;
+    }));
+    app.post('/api/projects/:id/security/kinds/:kind/cancel', h((req) => ({ cancelled: scanOf(req).cancel() })));
+    app.get('/api/projects/:id/security/kinds/:kind/runs', h(async (req) => {
+      const s = this.session(req);
+      const sc = scanOf(req);
+      return this.store.col('security_scan_runs').find({ projectId: s.id, category: sc.kind.category }, { projection: { readiness: 0, 'target.log': 0 } }).sort({ startedAt: -1 }).limit(30).toArray();
+    }));
+    app.get('/api/projects/:id/security/runs/:rid', h(async (req) => {
+      const s = this.session(req);
+      const run = await this.store.col('security_scan_runs').findOne({ _id: req.params.rid as never, projectId: s.id });
+      const observations = await this.store.col('security_observations').find({ runId: req.params.rid, projectId: s.id }).limit(2000).toArray();
+      return { run, observations };
     }));
 
     app.post('/api/projects/:id/baseline', h(async (req) => this.session(req).markBaseline()));
@@ -284,7 +358,7 @@ export class Service {
         const s = this.session(req);
         const rel = String((req.params as Record<string, string>)[0] ?? '');
         const abs = s.artifactPath(rel);
-        if (!abs || !abs.endsWith('.png')) return res.status(404).end();
+        if (!abs || !(abs.endsWith('.png') || abs.endsWith('.redacted.jsonl'))) return res.status(404).end();
         res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
         res.sendFile(abs);
       } catch { res.status(404).end(); }

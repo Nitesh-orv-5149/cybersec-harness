@@ -97,11 +97,17 @@ export interface CallFact {
   asReference?: boolean;
 }
 
+/** Suffix of the declaration recorded for a function returned by another function (handler factories). */
+export const RETURNED_SUFFIX = '.<returned>';
+
 export interface RouteFact {
   receiver: string;
   method: string;
   path: string;
-  handler: { kind: 'ident'; name: string } | { kind: 'member'; object: string; prop: string } | { kind: 'inline'; qname: string } | null;
+  handler: { kind: 'ident'; name: string } | { kind: 'member'; object: string; prop: string } | { kind: 'inline'; qname: string }
+    /** `app.get(path, makeHandler())`: the handler is the function that makeHandler returns */
+    | { kind: 'factory'; ref: { kind: 'ident'; name: string } | { kind: 'member'; object: string; prop: string } }
+    | null;
   middleware: string[];
   line: number;
   hash: string;

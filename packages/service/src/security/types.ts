@@ -3,10 +3,14 @@
 // reported as "no findings".
 import type { ProjectConfig } from '../config.js';
 
-export type ScanCategory = 'dependency_vulns' | 'api_dast';
+export type ScanCategory = 'dependency_vulns' | 'api_dast' | 'web_dast';
 export type ToolId = 'osv-api' | 'osv-scanner' | 'npm-audit' | 'trivy';
 export type ApiToolId = 'schemathesis';
-export type AnyToolId = ToolId | ApiToolId;
+export type WebToolId = 'nuclei';
+export type StaticToolId = 'gitleaks' | 'checkov';
+/** Ids reserved for tools that are NOT integrated yet (dashboard labels only; no adapter exists). */
+export type PlannedToolId = 'zap' | 'semgrep' | 'syft' | 'grype';
+export type AnyToolId = ToolId | ApiToolId | WebToolId | StaticToolId | PlannedToolId;
 
 export type ReadinessState =
   | 'ready'           // executable found and `--version` succeeded
@@ -45,6 +49,15 @@ export interface ExecOptions {
   signal?: AbortSignal;
   /** strip proxy settings: the tool only talks to a loopback target */
   localOnly?: boolean;
+  /** extra variables on top of the minimal environment (tool switches only, never secrets) */
+  extraEnv?: Record<string, string>;
+  /** streaming observers (output is still collected and bounded as usual) */
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
+  /** how much of the stderr tail to keep (default 4000 characters) */
+  stderrTailBytes?: number;
+  /** The tool writes its report to a file; stdout is counted but not kept, so it cannot hit maxOutputBytes. */
+  discardStdout?: boolean;
 }
 
 export type Exec = (binary: string, args: string[], opts: ExecOptions) => Promise<ExecResult>;

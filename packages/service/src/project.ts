@@ -18,7 +18,11 @@ import { graphFindings, runtimeFindings, type FindingDraft } from './findings.js
 import { log } from './log.js';
 import { newId, sha256, shortHash } from './util.js';
 import { DependencyScanService } from './security/deps/service.js';
+import { WebScanService, type SnapshotTargets } from './security/web/service.js';
 import type { Exec, Which } from './security/types.js';
+import { ScanService } from './security/scan/service.js';
+import { SCAN_KINDS } from './security/scan/registry.js';
+import type { KindId, ManagedTarget } from './security/scan/types.js';
 
 export type BrowserRunStatus = 'pending' | 'building' | 'browser_running' | 'comparing' | 'completed' | 'failed' | 'inconclusive' | 'cancelled';
 
@@ -70,8 +74,10 @@ export class ProjectSession extends EventEmitter {
   private verifyQueued = false;
   lastBrowserRun: Record<string, unknown> | null = null;
   readonly deps: DependencyScanService;
+  readonly web: WebScanService;
+  readonly scans = new Map<KindId, ScanService>();
 
-  constructor(readonly root: string, private readonly store: Store, private readonly dataDir: string, scannerHooks: { exec?: Exec; which?: Which } = {}) {
+  constructor(readonly root: string, private readonly store: Store, private readonly dataDir: string, scannerHooks: { exec?: Exec; which?: Which; fetch?: typeof fetch } = {}) {
     super();
     this.root = fs.realpathSync(root);
     this.id = `prj_${shortHash(this.root, 16)}`;
@@ -84,6 +90,52 @@ export class ProjectSession extends EventEmitter {
       graphVersion: () => this.live?.graphVersion ?? null, sourceHash: () => this.live?.sourceHash ?? null,
       emit: (kind, payload) => this.emitState(kind, payload), ...scannerHooks,
     });
+    this.web = new WebScanService({
+      projectId: this.id, projectDir: this.projectDir, store: this.store,
+      cfg: () => this.cfg.security.nuclei, graph: () => this.live?.graph ?? null,
+      graphVersion: () => this.live?.graphVersion ?? null, sourceHash: () => this.live?.sourceHash ?? null,
+      snapshotReadiness: () => this.snapshotTargetReadiness(), prepareSnapshots: () => this.prepareSnapshotTargets(),
+      emit: (kind, payload) => this.emitState(kind, payload), ...scannerHooks,
+    });
+    for (const k of SCAN_KINDS) {
+      this.scans.set(k.id, new ScanService(k, {
+        projectId: this.id, root: this.root, projectDir: this.projectDir, store: this.store,
+        cfg: () => this.cfg, graph: () => this.live?.graph ?? null,
+        graphVersion: () => this.live?.graphVersion ?? null, sourceHash: () => this.live?.sourceHash ?? null,
+        emit: (kind, payload) => this.emitState(kind, payload),
+        runApproved: () => this.runApprovedForTargets(),
+        startTarget: (signal) => this.startManagedTarget(signal),
+        ...scannerHooks,
+      }));
+    }
+  }
+
+  /** Dynamic scanners only ever test a copy of this project started with the approved run commands. */
+  runApprovedForTargets(): { ok: boolean; reason: string | null } {
+    if (this.loaded.error) return { ok: false, reason: this.loaded.error };
+    if (!this.cfg.run) return { ok: false, reason: `no "run" section in ${CONFIG_FILE}: the workbench needs build/start commands to start a local copy to test` };
+    if (!this.runApproval || this.runApproval.hash !== this.loaded.runHash) return { ok: false, reason: 'run commands have not been approved in the dashboard (or changed since approval)' };
+    return { ok: true, reason: null };
+  }
+
+  /** Snapshot the workspace, build and start it on a free loopback port, and hand back a stop() that cleans up. */
+  async startManagedTarget(signal: AbortSignal): Promise<ManagedTarget> {
+    const ok = this.runApprovedForTargets();
+    if (!ok.ok) throw new Error(ok.reason!);
+    const cfg = this.cfg;
+    const snap = captureSnapshot(this.root, cfg, path.join(this.projectDir, 'snapshots'), this.id);
+    await this.persistSnapshot(snap, 'security-target');
+    const work = prepareWorkspace(snap.storagePath, this.root, cfg, path.join(this.projectDir, 'work', newId('sectgt')));
+    try {
+      const app = await buildAndStart(work, cfg.run!, () => {}, signal);
+      return {
+        url: app.url, snapshotId: snap.snapshotId, contentHash: snap.contentHash, log: app.log,
+        stop: async () => { await app.stop(); fs.rmSync(work, { recursive: true, force: true }); },
+      };
+    } catch (e) {
+      fs.rmSync(work, { recursive: true, force: true });
+      throw e;
+    }
   }
 
   get cfg(): ProjectConfig { return this.loaded.config; }
@@ -112,7 +164,10 @@ export class ProjectSession extends EventEmitter {
     fs.mkdirSync(this.projectDir, { recursive: true });
     await this.persistProject();
     await this.loadPersistedState();
+    await this.migrateFindingIds();
     await this.deps.loadLastRun();
+    await this.web.loadLastRun();
+    for (const sc of this.scans.values()) await sc.loadLastRun();
     await this.runAnalysis([], 'initial', true);
   }
 
@@ -191,6 +246,8 @@ export class ProjectSession extends EventEmitter {
   async dispose() {
     this.browserJob?.abort.abort();
     this.deps.cancel();
+    this.web.cancel();
+    for (const sc of this.scans.values()) sc.cancel();
     await this.stopMonitoring().catch(() => {});
   }
 
@@ -245,7 +302,7 @@ export class ProjectSession extends EventEmitter {
       if (contentHash) this.lastFileHash.set(memoKey, contentHash);
       if (ch.type === 'unlink') this.lastFileHash.delete(memoKey);
       const prevEvent = this.lastEventByPath.get(rel) ?? 'none';
-      const dedupeKey = sha256(`${rel}|${ch.type}|${ch.source}|${contentHash ?? '-'}|${ch.source === 'manual' ? runId : prevEvent}`);
+      const dedupeKey = sha256(`${this.id}|${rel}|${ch.type}|${ch.source}|${contentHash ?? '-'}|${ch.source === 'manual' ? runId : prevEvent}`);
       const eventId = `evt_${dedupeKey.slice(0, 20)}`;
       this.lastEventByPath.set(rel, eventId);
       ids.push(eventId);
@@ -347,7 +404,8 @@ export class ProjectSession extends EventEmitter {
   }
 
   private async persistGraph(graph: Graph, graphHash: string, sourceHash: string, label: string): Promise<string> {
-    const id = `graph_${graphHash}`;
+    // Project-scoped id: identical code in two projects sharing one database must not collide on _id.
+    let id = `graph_${shortHash(`${this.id}|${graphHash}`, 24)}`;
     await this.safe(async () => {
       const json = JSON.stringify(graph);
       let body: Record<string, unknown> = { graph };
@@ -357,11 +415,12 @@ export class ProjectSession extends EventEmitter {
         fs.writeFileSync(p, json);
         body = { storagePath: p };
       }
-      await this.store.col('graph_snapshots').updateOne(
+      const doc = await this.store.col('graph_snapshots').findOneAndUpdate(
         { projectId: this.id, graphHash },
         { $setOnInsert: { _id: id as never, projectId: this.id, graphHash, sourceHash, parserVersion: graph.provider, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, stats: graph.stats, createdAt: new Date(), ...body }, $addToSet: { labels: label } },
-        { upsert: true },
+        { upsert: true, returnDocument: 'after', projection: { _id: 1 } },
       );
+      if (doc) id = doc._id as unknown as string; // an earlier snapshot of this project may use the old id format
     }, undefined);
     return id;
   }
@@ -381,11 +440,33 @@ export class ProjectSession extends EventEmitter {
 
   // ------------------------------------------------------------------ findings lifecycle
 
+  /** Finding ids from findings.ts depend only on the code; suffix the project so shared databases do not mix projects. */
+  private scopeFindings(drafts: FindingDraft[]): FindingDraft[] {
+    return drafts.map((d) => ({ ...d, _id: `${d._id}_${this.id.slice(4, 12)}` }));
+  }
+
+  /** One-time move of this project's graph/runtime findings from the old unscoped ids to scoped ids. */
+  private async migrateFindingIds() {
+    await this.safe(async () => {
+      const col = this.store.col('graph_findings');
+      const old = await col.find({ projectId: this.id, source: { $in: ['graph', 'runtime'] }, _id: { $regex: /^(gf|rf)_[0-9a-f]{16}$/ } as never }).toArray();
+      for (const f of old) {
+        const oldId = f._id as unknown as string;
+        const newId = `${oldId}_${this.id.slice(4, 12)}`;
+        await col.updateOne({ _id: newId as never }, { $setOnInsert: { ...f, _id: newId } }, { upsert: true });
+        await this.store.col('verification_records').updateMany({ projectId: this.id, findingId: oldId }, { $set: { findingId: newId } });
+        await col.deleteOne({ _id: f._id, projectId: this.id });
+      }
+      if (old.length) log.info(`migrated ${old.length} finding id(s) to project-scoped ids`);
+    }, undefined);
+  }
+
   private async syncFindings(drafts: FindingDraft[], source: 'graph' | 'runtime', ctx: { analysisRunId?: string; browserRunId?: string; coveredScenarios?: { id: string; viewport: string; candidateStatus: string }[] }) {
     const col = this.store.col('graph_findings');
     const vr = this.store.col('verification_records');
     const now = new Date();
     const seen = new Set<string>();
+    drafts = this.scopeFindings(drafts);
     for (const d of drafts) {
       seen.add(d._id);
       const existing = await col.findOne({ _id: d._id as never });
@@ -421,7 +502,7 @@ export class ProjectSession extends EventEmitter {
   // ------------------------------------------------------------------ baseline + verification
 
   async markBaseline() {
-    const snap = captureSnapshot(this.root, this.cfg, path.join(this.projectDir, 'snapshots'));
+    const snap = captureSnapshot(this.root, this.cfg, path.join(this.projectDir, 'snapshots'), this.id);
     const graph = analyzeDirectory(this.analyzerOptions(path.join(snap.storagePath, 'src')));
     await this.persistSnapshot(snap, 'baseline');
     const graphHash = sha256(JSON.stringify(graph.nodes.map((n) => [n.id, n.hash])) + JSON.stringify(graph.edges.map((e) => e.id))).slice(0, 24);
@@ -465,6 +546,52 @@ export class ProjectSession extends EventEmitter {
     return { ok: reasons.length === 0, reasons };
   }
 
+  /** Can the baseline and current snapshots be started for a security scan? (Browser scenarios are not needed.) */
+  snapshotTargetReadiness(): { ok: boolean; reasons: string[] } {
+    const reasons: string[] = [];
+    if (this.loaded.error) reasons.push(this.loaded.error);
+    if (!this.cfg.run) reasons.push(`no "run" section in ${CONFIG_FILE}: build/start commands must be configured explicitly`);
+    else if (!this.runApproval || this.runApproval.hash !== this.loaded.runHash) reasons.push('run commands have not been approved in the dashboard (or changed since approval)');
+    if (!this.baseline) reasons.push('no baseline snapshot yet: mark the current working state as baseline first');
+    if (!this.store.available) reasons.push('MongoDB unavailable: scan results could not be recorded');
+    return { ok: reasons.length === 0, reasons };
+  }
+
+  /** Snapshot the current files and hand out start functions for both sides, mirroring executeVerification. */
+  private async prepareSnapshotTargets(): Promise<SnapshotTargets> {
+    const cfg = this.cfg;
+    const run = cfg.run!;
+    const baseline = this.baseline!;
+    const unsaved = [...this.analyzer.overlayFiles()];
+    const candidate = captureSnapshot(this.root, cfg, path.join(this.projectDir, 'snapshots'), this.id);
+    await this.persistSnapshot(candidate, 'candidate');
+    const candidateGraph = analyzeDirectory(this.analyzerOptions(path.join(candidate.storagePath, 'src')));
+    const files = manifestDiff(baseline.manifest, candidate.manifest);
+    const depsChanged = [...files.modified, ...files.added, ...files.removed].filter((f) => MANIFEST_FILES.has(f));
+    const notes: string[] = [];
+    if (unsaved.length) notes.push(`Unsaved editor buffers are NOT included in this scan: ${unsaved.join(', ')}`);
+    if (depsChanged.length && cfg.snapshot.linkNodeModules) notes.push(`Dependency manifests differ (${depsChanged.join(', ')}); both sides use the workspace's current node_modules.`);
+    const tag = newId('wsec');
+    return {
+      baseline: { snapshotId: baseline.snapshotId, contentHash: baseline.contentHash },
+      candidate: { snapshotId: candidate.snapshotId, contentHash: candidate.contentHash },
+      candidateGraph, baselineGraph: baseline.graph, notes,
+      start: async (side, signal, onPhase) => {
+        const snapPath = side === 'baseline' ? baseline.storagePath : candidate.storagePath;
+        const work = prepareWorkspace(snapPath, this.root, cfg, path.join(this.projectDir, 'work', `${tag}-${side}`));
+        const cleanup = () => fs.rmSync(work, { recursive: true, force: true });
+        try {
+          const app = await buildAndStart(work, run, (phase) => onPhase(phase), signal);
+          return { ...app, cleanup };
+        } catch (e) {
+          cleanup();
+          throw Object.assign(new Error((e as Error).message), { output: e instanceof StepError ? e.output : '' });
+        }
+      },
+      isStale: () => { try { return captureContentHash(this.root, cfg) !== candidate.contentHash; } catch { return false; } },
+    };
+  }
+
   cancelVerification() {
     if (!this.browserJob) return false;
     this.verifyQueued = false;
@@ -501,7 +628,7 @@ export class ProjectSession extends EventEmitter {
     const unsavedAtStart = [...this.analyzer.overlayFiles()];
     let candidate: SnapshotInfo;
     try {
-      candidate = captureSnapshot(this.root, cfg, path.join(this.projectDir, 'snapshots'));
+      candidate = captureSnapshot(this.root, cfg, path.join(this.projectDir, 'snapshots'), this.id);
     } catch (e) {
       await this.safe(() => this.store.col('browser_runs').insertOne({ _id: runId as never, projectId: this.id, status: 'failed', trigger, startedAt: new Date(), finishedAt: new Date(), error: `could not snapshot workspace: ${(e as Error).message}` }), undefined);
       this.emitState('browser', { runId, status: 'failed' });
@@ -598,7 +725,7 @@ export class ProjectSession extends EventEmitter {
           baselineSnapshotId: baseline.snapshotId, candidateSnapshotId: candidate.snapshotId,
           items, summary: counts, filesChanged: files,
           graphChanges: { changedNodes: graphDiff.changedNodes, addedNodes: graphDiff.addedNodes.filter((n) => !n.startsWith('mod:')), removedNodes: graphDiff.removedNodes.filter((n) => !n.startsWith('mod:')) },
-          correlatedFindingIds: drafts.map((d) => d._id),
+          correlatedFindingIds: this.scopeFindings(drafts).map((d) => d._id),
           confidence: items.some((i) => i.classification === 'inconclusive') ? 'partial' : 'complete',
           limitations: [
             'Only configured scenarios and viewports were exercised; untested pages may still regress.',
@@ -627,7 +754,7 @@ export class ProjectSession extends EventEmitter {
       id: this.id, name: this.name, root: this.root,
       monitoring: this.monitoring,
       analysis: { status: this.analysisStatus, error: this.analysisError, pendingFiles: [...this.pending.keys()] },
-      config: { source: this.loaded.source, error: this.loaded.error ?? null, run: this.cfg.run ?? null, runHash: this.loaded.runHash, runApproved: !!this.runApproval && this.runApproval.hash === this.loaded.runHash, verificationTrigger: this.cfg.verification.trigger, scenarios: this.cfg.browser.scenarios.map((s) => ({ id: s.id, name: s.name, path: s.path })), viewports: this.cfg.browser.viewports },
+      config: { source: this.loaded.source, error: this.loaded.error ?? null, warnings: this.loaded.warnings ?? [], run: this.cfg.run ?? null, runHash: this.loaded.runHash, runApproved: !!this.runApproval && this.runApproval.hash === this.loaded.runHash, verificationTrigger: this.cfg.verification.trigger, scenarios: this.cfg.browser.scenarios.map((s) => ({ id: s.id, name: s.name, path: s.path })), viewports: this.cfg.browser.viewports },
       parser: { provider: PARSER_VERSION, languages: ['javascript', 'typescript'], framework: 'express' },
       live: this.live ? {
         graphVersion: this.live.graphVersion, graphHash: this.live.graphHash, sourceHash: this.live.sourceHash, analyzedAt: this.live.analyzedAt,
@@ -640,7 +767,7 @@ export class ProjectSession extends EventEmitter {
       verification: ready,
       lastBrowserRun: this.lastBrowserRun ? { id: this.lastBrowserRun._id, status: this.lastBrowserRun.status, candidateSnapshotId: this.lastBrowserRun.candidateSnapshotId, finishedAt: this.lastBrowserRun.finishedAt, error: this.lastBrowserRun.error ?? null } : null,
       store: { available: this.store.available, error: this.store.lastError },
-      security: { dependencies: this.deps.status() },
+      security: { dependencies: this.deps.status(), web: this.web.status(), scans: Object.fromEntries([...this.scans].map(([k, v]) => [k, v.status()])) },
     };
   }
 

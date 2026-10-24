@@ -1,0 +1,2 @@
+{"templateId":"workbench-debug-page","matchedAt":"http://127.0.0.1:PORT/debug","severity":"low","extracted":[]}
+{"templateId":"workbench-canary-header","matchedAt":"http://127.0.0.1:PORT/canary","severity":"medium","extracted":["4.5.6"]}
