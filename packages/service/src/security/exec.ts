@@ -19,6 +19,13 @@ export function scannerEnv(): NodeJS.ProcessEnv {
   return { ...env, NO_COLOR: '1', CI: '1' };
 }
 
+/** For tools that only talk to a local target: no proxy settings, and an explicit no-proxy for everything. */
+export function localOnlyEnv(): NodeJS.ProcessEnv {
+  const env = scannerEnv();
+  for (const k of Object.keys(env)) if (/^(https?|all)_proxy$/i.test(k) || /^no_proxy$/i.test(k)) delete env[k];
+  return { ...env, NO_PROXY: '*', no_proxy: '*' };
+}
+
 export const which: Which = (name, explicit) => {
   const isExec = (p: string) => { try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; } };
   if (explicit) return path.isAbsolute(explicit) && isExec(explicit) ? explicit : null;
@@ -40,7 +47,7 @@ export const execTool: Exec = (binary, args, opts) => new Promise<ExecResult>((r
   const stderr = new OutputBuffer(8 * 1024);
   let child;
   try {
-    child = spawn(binary, args, { cwd: opts.cwd, env: scannerEnv(), detached: true, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+    child = spawn(binary, args, { cwd: opts.cwd, env: opts.localOnly ? localOnlyEnv() : scannerEnv(), detached: true, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
   } catch (e) {
     resolve({ exitCode: null, signal: null, stdout: '', stdoutBytes: 0, stdoutTruncated: false, stderrTail: '', timedOut: false, cancelled: false, spawnError: String((e as Error).message ?? e), durationMs: 0 });
     return;

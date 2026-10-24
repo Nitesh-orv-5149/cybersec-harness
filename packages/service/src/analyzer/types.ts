@@ -132,6 +132,14 @@ export interface RequestFact {
   line: number;
 }
 
+/** A request input read directly inside a function whose first parameter is the request object (req.query.q, const { id } = req.params, req.body). */
+export interface RequestInputFact {
+  from: string;
+  location: 'query' | 'path' | 'body' | 'header';
+  name: string | null;   // null: the whole object is used (e.g. validate(req.body)), field names unknown
+  line: number;
+}
+
 export interface RenderFact {
   from: string | null;
   tag: string;
@@ -155,6 +163,7 @@ export interface FileFacts {
   sinks: SinkFact[];
   requests: RequestFact[];
   renders: RenderFact[];
+  inputs?: RequestInputFact[];
   parseError?: string;
 }
 

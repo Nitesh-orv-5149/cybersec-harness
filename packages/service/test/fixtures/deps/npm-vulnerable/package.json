@@ -1,0 +1,13 @@
+{
+  "name": "deps-fixture-vulnerable",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Test fixture only. Pins old dependency versions with published advisories. Never installed or executed; only its lockfile is audited.",
+  "dependencies": {
+    "express": "4.17.1",
+    "lodash": "4.17.20"
+  },
+  "devDependencies": {
+    "minimist": "1.2.5"
+  }
+}

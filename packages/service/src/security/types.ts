@@ -3,8 +3,10 @@
 // reported as "no findings".
 import type { ProjectConfig } from '../config.js';
 
-export type ScanCategory = 'dependency_vulns';
+export type ScanCategory = 'dependency_vulns' | 'api_dast';
 export type ToolId = 'osv-api' | 'osv-scanner' | 'npm-audit' | 'trivy';
+export type ApiToolId = 'schemathesis';
+export type AnyToolId = ToolId | ApiToolId;
 
 export type ReadinessState =
   | 'ready'           // executable found and `--version` succeeded
@@ -15,7 +17,7 @@ export type ReadinessState =
   | 'disabled';       // turned off by configuration
 
 export interface Readiness {
-  tool: ToolId;
+  tool: AnyToolId;
   state: ReadinessState;
   version: string | null;
   binary: string | null;
@@ -41,6 +43,8 @@ export interface ExecOptions {
   timeoutMs: number;
   maxOutputBytes: number;
   signal?: AbortSignal;
+  /** strip proxy settings: the tool only talks to a loopback target */
+  localOnly?: boolean;
 }
 
 export type Exec = (binary: string, args: string[], opts: ExecOptions) => Promise<ExecResult>;
@@ -123,7 +127,7 @@ export interface InterpretContext {
 export type SecurityConfig = ProjectConfig['security'];
 
 export interface ToolRunRecord {
-  tool: ToolId;
+  tool: AnyToolId;
   displayName: string;
   version: string | null;
   readiness: ReadinessState;

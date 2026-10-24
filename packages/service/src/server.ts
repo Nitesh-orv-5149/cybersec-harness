@@ -13,6 +13,7 @@ import { ProjectSession } from './project.js';
 import { GraphIndex, impactOf } from './analyzer/query.js';
 import { graphFindings } from './findings.js';
 import { browserAvailable } from './browser.js';
+import { newId } from './util.js';
 import { log } from './log.js';
 import { registerAgentRoutes } from './agentMemory.js';
 
@@ -207,6 +208,73 @@ export class Service {
     }));
 
     app.get('/api/projects/:id/security/summary', h(async (req) => this.store.dependencySummary(this.session(req).id)));
+
+    app.get('/api/projects/:id/findings/:fid/observations', h(async (req) => {
+      const s = this.session(req);
+      return this.store.col('security_observations').find({ projectId: s.id, findingId: req.params.fid }).sort({ observedAt: -1 }).limit(200).toArray();
+    }));
+
+    // ---- dependency vulnerability scanning (external tools; never downloaded or installed by the service) ----
+    app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));
+
+    app.post('/api/projects/:id/security/dependency-scans', h(async (req, res) => {
+      const { tools, trigger } = z.object({
+        tools: z.array(z.enum(['osv-api', 'npm-audit', 'osv-scanner', 'trivy'])).min(1).optional(),
+        trigger: z.enum(['manual', 'agent']).default('manual'),
+      }).parse(req.body ?? {});
+      const r = await this.session(req).deps.start(trigger, tools);
+      res.status(202);
+      return r;
+    }));
+
+    app.post('/api/projects/:id/security/dependency-scans/cancel', h((req) => ({ cancelled: this.session(req).deps.cancel() })));
+
+    app.get('/api/projects/:id/security/dependency-scans', h(async (req) => {
+      const s = this.session(req);
+      return this.store.col('security_scan_runs').find({ projectId: s.id, category: 'dependency_vulns' }, { projection: { readiness: 0 } }).sort({ startedAt: -1 }).limit(30).toArray();
+    }));
+
+    app.get('/api/projects/:id/security/dependency-scans/:rid', h(async (req) => {
+      const s = this.session(req);
+      const run = await this.store.col('security_scan_runs').findOne({ _id: req.params.rid as never, projectId: s.id });
+      const observations = await this.store.col('security_observations').find({ runId: req.params.rid, projectId: s.id }).limit(2000).toArray();
+      return { run, observations };
+    }));
+
+    app.get('/api/projects/:id/security/summary', h(async (req) => this.store.dependencySummary(this.session(req).id)));
+
+    // ---- AI agent activity log (the LLM orchestrator reports its decisions and tool runs here) ----
+    app.post('/api/projects/:id/agent/events', h(async (req, res) => {
+      const s = this.session(req);
+      const body = z.object({
+        type: z.enum(['change', 'decision', 'tool_result', 'scan', 'info']),
+        endpoint: z.string().nullish(),
+        tool: z.string().nullish(),
+        severity: z.enum(['high', 'medium', 'low', 'info', 'unknown']).nullish(),
+        title: z.string().max(500),
+        detail: z.string().max(4000).nullish(),
+        data: z.record(z.unknown()).nullish(),
+      }).parse(req.body ?? {});
+      const doc = { _id: newId('age') as never, projectId: s.id, at: new Date(), ...body };
+      await this.store.col('agent_activity').insertOne(doc);
+      this.broadcast({ kind: 'agent', projectId: s.id, at: new Date().toISOString() });
+      res.status(202);
+      return { id: doc._id };
+    }));
+
+    app.get('/api/projects/:id/agent/events', h(async (req) => {
+      const s = this.session(req);
+      const limit = Math.min(500, Number(req.query.limit) || 200);
+      const rows = await this.store.col('agent_activity').find({ projectId: s.id }).sort({ at: -1 }).limit(limit).toArray();
+      return rows.reverse(); // oldest-first for a readable log
+    }));
+
+    app.post('/api/projects/:id/agent/events/clear', h(async (req) => {
+      const s = this.session(req);
+      const { deletedCount } = await this.store.col('agent_activity').deleteMany({ projectId: s.id });
+      this.broadcast({ kind: 'agent', projectId: s.id, at: new Date().toISOString() });
+      return { deleted: deletedCount };
+    }));
 
     app.get('/api/projects/:id/findings/:fid/observations', h(async (req) => {
       const s = this.session(req);

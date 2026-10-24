@@ -3,7 +3,7 @@
 import ts from 'typescript';
 import type {
   CallFact, CalleeRef, DeclFact, FileFacts, ImportBinding, LanguageAdapter, ParseOptions,
-  RenderFact, RequestFact, RouteFact, SinkFact, SinkKind,
+  RenderFact, RequestFact, RequestInputFact, RouteFact, SinkFact, SinkKind,
 } from './types.js';
 import { shortHash } from '../util.js';
 
@@ -61,7 +61,7 @@ export const jsAdapter: LanguageAdapter = {
       isTest: isTestFile(file),
       isClient: opts.isClient,
       imports: [], exports: {}, decls: [], objectVars: [], routerVars: {},
-      calls: [], routes: [], mounts: [], sinks: [], requests: [], renders: [],
+      calls: [], routes: [], mounts: [], sinks: [], requests: [], renders: [], inputs: [],
     };
 
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kindFor(file));
@@ -305,7 +305,49 @@ export const jsAdapter: LanguageAdapter = {
       return true;
     };
 
+    // Request inputs read directly from the handler's first parameter (req.query.x, req.params.x, req.body, destructuring).
+    const INPUT_LOC: Record<string, RequestInputFact['location']> = { query: 'query', params: 'path', body: 'body', headers: 'header' };
+    const inputKeys = new Set<string>();
+    const addInput = (location: RequestInputFact['location'], name: string | null, node: ts.Node) => {
+      const cur = current();
+      if (!cur) return;
+      const key = `${cur.qname}|${location}|${name}`;
+      if (inputKeys.has(key)) return;
+      inputKeys.add(key);
+      facts.inputs!.push({ from: cur.qname, location, name, line: line(node) });
+    };
+    const reqContainer = (e: ts.Expression): RequestInputFact['location'] | null => {
+      const req = current()?.params[0];
+      if (!req || !ts.isPropertyAccessExpression(e) || !ts.isIdentifier(e.expression) || e.expression.text !== req) return null;
+      return INPUT_LOC[e.name.text] ?? null;
+    };
+    const checkRequestInput = (n: ts.Node) => {
+      if (ts.isPropertyAccessExpression(n)) {
+        const loc = reqContainer(n.expression);
+        if (loc) return addInput(loc, n.name.text, n);
+        const whole = reqContainer(n);
+        // req.body passed or assigned as a whole (not followed by .field)
+        if (whole && !(ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n) && !(ts.isElementAccessExpression(n.parent) && n.parent.expression === n)
+          && !(ts.isVariableDeclaration(n.parent) && ts.isObjectBindingPattern(n.parent.name))) addInput(whole, null, n);
+      }
+      if (ts.isElementAccessExpression(n)) {
+        const loc = reqContainer(n.expression);
+        const key = stringValue(n.argumentExpression);
+        if (loc && key) addInput(loc, key, n);
+      }
+      if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer) {
+        const loc = reqContainer(n.initializer);
+        if (loc) {
+          for (const el of n.name.elements) {
+            const nm = el.propertyName && (ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)) ? el.propertyName.text : ts.isIdentifier(el.name) ? el.name.text : null;
+            if (nm && !el.dotDotDotToken) addInput(loc, nm, el);
+          }
+        }
+      }
+    };
+
     const visit = (n: ts.Node): void => {
+      checkRequestInput(n);
       if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && isStringBuild(n.initializer)) {
         builtStrings.set(`${current()?.qname ?? ''}|${n.name.text}`, n.initializer);
       }

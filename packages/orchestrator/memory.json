@@ -1,0 +1,122 @@
+[
+  {
+    "_id": "5cda2faf-12c9-43f9-ba99-d5f1aaa0b9da",
+    "at": "2026-10-24T10:14:47.446360+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/orders",
+    "severity": "low",
+    "summary": "GET /api/orders returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "44dc8f00-be21-496e-9e47-599604459864",
+    "at": "2026-10-24T10:14:48.030213+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/orders/:id",
+    "severity": "low",
+    "summary": "GET /api/orders/:id returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "dbc7602f-4deb-473b-b699-dec64fd43224",
+    "at": "2026-10-24T10:14:49.428141+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/orders/:id/receipt",
+    "severity": "low",
+    "summary": "GET /api/orders/:id/receipt returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "8ec5fc8b-1f95-4afa-a2de-97b21f1ace58",
+    "at": "2026-10-24T10:14:49.903351+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/orders/:id/export",
+    "severity": "low",
+    "summary": "GET /api/orders/:id/export returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "dcc20bdb-f0d0-4f6f-b325-e08b857ae83e",
+    "at": "2026-10-24T10:22:29.010546+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/orders/:id/cancel",
+    "severity": "low",
+    "summary": "GET /api/orders/:id/cancel returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "23459c9f-cd01-41b0-adbb-36239ae3c1e0",
+    "at": "2026-10-24T12:17:24.059304+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/users",
+    "severity": "low",
+    "summary": "GET /api/users returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "c5cf6cd1-2aad-4018-8793-f8ca671ebe55",
+    "at": "2026-10-24T12:17:36.902188+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/users/search",
+    "severity": "low",
+    "summary": "GET /api/users/search returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "9dbf971e-93ab-481b-ba40-21201c1b227b",
+    "at": "2026-10-24T12:17:40.125460+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/users/:id/profile",
+    "severity": "low",
+    "summary": "GET /api/users/:id/profile returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "GET"
+    }
+  },
+  {
+    "_id": "9e120fd5-8967-40cd-a758-e18b9c7c5fee",
+    "at": "2026-10-24T12:17:40.319852+00:00",
+    "tool": "sqli_probe",
+    "endpoint": "/api/users/:id/profile",
+    "severity": "high",
+    "summary": "GET /api/users/1' OR '1'='1/profile crashed with 500 \u2014 unsanitized input likely reaching a query",
+    "evidence": {
+      "status": 500,
+      "payload": "/api/users/1' OR '1'='1/profile"
+    }
+  },
+  {
+    "_id": "916760ed-8d1f-418d-ae49-41d1f65a2c47",
+    "at": "2026-10-24T12:17:41.724567+00:00",
+    "tool": "auth_probe",
+    "endpoint": "/api/users/:id/role",
+    "severity": "medium",
+    "summary": "POST /api/users/:id/role returned 200 with no auth header",
+    "evidence": {
+      "status": 200,
+      "method": "POST"
+    }
+  }
+]
