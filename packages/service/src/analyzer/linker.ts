@@ -177,6 +177,12 @@ export function link(all: FileFacts[], provider: string, unsavedFiles: Set<strin
         if (r.handler?.kind === 'inline') handlerId = declId(f.file, r.handler.qname);
         else if (r.handler?.kind === 'ident') handlerId = resolveIdent(f.file, r.handler.name);
         else if (r.handler?.kind === 'member') handlerId = resolveMember(f.file, r.handler.object, r.handler.prop);
+        if (handlerId) {
+          // request inputs the handler reads directly (used to describe the endpoint, e.g. for API schema generation)
+          const hm = /^fn:(.+)#(.+)$/.exec(handlerId);
+          const ins = hm ? (byFile.get(hm[1])?.inputs ?? []).filter((x) => x.from === hm[2]) : [];
+          if (ins.length) nodes.get(id)!.meta.inputs = ins.map((x) => ({ location: x.location, name: x.name, line: x.line, file: hm![1] }));
+        }
         if (handlerId) addEdge({ source: id, target: handlerId, kind: 'route_to_handler', loc: { file: f.file, line: r.line }, certainty, confidence: receiverKnown ? 1 : 0.7, derivation: receiverKnown ? `route registered on Express ${f.routerVars[r.receiver]} '${r.receiver}'` : `route-like call on '${r.receiver}' (receiver type inferred from name)` });
         for (const mw of r.middleware) {
           const mid = /^[A-Za-z_$][\w$]*$/.test(mw) ? resolveIdent(f.file, mw) : null;

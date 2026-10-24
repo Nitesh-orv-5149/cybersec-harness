@@ -114,6 +114,11 @@ export class Analyzer {
     for (const f of files) this.parseFile(f);
   }
 
+  /** Read-only view of the current per-file facts (used by security correlation). */
+  factsList(): FileFacts[] {
+    return [...this.facts.values()];
+  }
+
   fileHashes(): Record<string, string> {
     return Object.fromEntries([...this.facts.values()].map((f) => [f.file, f.hash]));
   }

@@ -84,5 +84,9 @@
   "verification": {
     "trigger": "manual",
     "debounceMs": 400
+  },
+  "security": {
+    "allowNetwork": true,
+    "dependencies": { "mode": "all-available", "order": ["osv-api", "npm-audit", "osv-scanner", "trivy"] }
   }
 }

@@ -1,0 +1,53 @@
+{
+  "_fixture": "SYNTHETIC. Hand-written from the documented osv-scanner JSON layout (results[].source, packages[].package, vulnerabilities[] = OSV records, groups[]) and the OSV schema. NOT produced by osv-scanner; replace with real output once the tool can be installed. Advisory contents are illustrative test data.",
+  "results": [
+    {
+      "source": { "path": "/project/package-lock.json", "type": "lockfile" },
+      "packages": [
+        {
+          "package": { "name": "lodash", "version": "4.17.20", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-35jh-r3h4-6jhm",
+              "aliases": ["CVE-2021-23337"],
+              "summary": "Command Injection in lodash",
+              "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H" }],
+              "affected": [
+                {
+                  "package": { "ecosystem": "npm", "name": "lodash" },
+                  "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "4.17.21" }] }]
+                }
+              ],
+              "references": [{ "type": "ADVISORY", "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm" }],
+              "database_specific": { "severity": "HIGH", "cwe_ids": ["CWE-77", "CWE-94"] }
+            }
+          ],
+          "groups": [{ "ids": ["GHSA-35jh-r3h4-6jhm"], "aliases": ["CVE-2021-23337", "GHSA-35jh-r3h4-6jhm"], "max_severity": "7.2" }]
+        },
+        {
+          "package": { "name": "minimist", "version": "1.2.5", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-xvch-5gv4-984h",
+              "aliases": [],
+              "summary": "Prototype Pollution in minimist",
+              "affected": [
+                {
+                  "package": { "ecosystem": "npm", "name": "minimist" },
+                  "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "1.0.0" }, { "fixed": "1.2.6" }, { "introduced": "0" }, { "fixed": "0.2.4" }] }]
+                }
+              ]
+            }
+          ],
+          "groups": [{ "ids": ["GHSA-xvch-5gv4-984h"], "max_severity": "9.8" }]
+        },
+        {
+          "package": { "name": "send", "version": "0.17.1", "ecosystem": "npm" },
+          "vulnerabilities": [
+            { "id": "SYNTHETIC-OSV-0001", "summary": "Record with no severity information at all", "affected": [{ "package": { "ecosystem": "npm", "name": "send" } }] }
+          ]
+        }
+      ]
+    }
+  ]
+}

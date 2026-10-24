@@ -62,6 +62,53 @@ export const ProjectConfigSchema = z.object({
     trigger: z.enum(['manual', 'on-save']).default('manual'),
     debounceMs: z.number().int().min(50).max(60_000).default(400),
   }).default({}),
+  security: z.object({
+    /** Scanners that contact remote services (advisory APIs, registries, DB downloads) run only when this is true. */
+    allowNetwork: z.boolean().default(false),
+    dependencies: z.object({
+      enabled: z.boolean().default(true),
+      /** first-available: run the first ready tool in `order` (falling back on failure); all-available: run every ready tool. */
+      mode: z.enum(['first-available', 'all-available']).default('first-available'),
+      order: z.array(z.enum(['osv-api', 'osv-scanner', 'npm-audit', 'trivy'])).min(1).default(['osv-api', 'npm-audit', 'osv-scanner', 'trivy']),
+      fallbackOnFailure: z.boolean().default(true),
+      includeDev: z.boolean().default(true),
+      timeoutMs: z.number().int().min(5_000).max(30 * 60_000).default(180_000),
+      maxOutputBytes: z.number().int().min(64 * 1024).max(256 * 1024 * 1024).default(32 * 1024 * 1024),
+      /** Explicit executable paths; otherwise PATH is searched. Nothing is ever downloaded. */
+      binaries: z.object({ 'osv-scanner': z.string().optional(), npm: z.string().optional(), trivy: z.string().optional() }).default({}),
+      /** Use a locally cached OSV database instead of api.osv.dev (osv-scanner --offline-vulnerabilities). */
+      osvOffline: z.boolean().default(false),
+      /** Use Trivy's cached DB without updating it (--skip-db-update --offline-scan). */
+      trivyOffline: z.boolean().default(false),
+    }).default({}),
+    /** Schema-driven API testing (Schemathesis) against a workbench-started local copy of the app. */
+    api: z.object({
+      enabled: z.boolean().default(true),
+      /** Active testing sends generated and malformed requests. Off unless set here; every run must also be confirmed in the dashboard. */
+      allowActiveTesting: z.boolean().default(false),
+      /** auto: use `path` when set, otherwise derive an OpenAPI document from the code graph's endpoints. */
+      schema: z.object({ source: z.enum(['auto', 'file', 'graph']).default('auto'), path: z.string().optional() }).default({}),
+      /** Only these methods are tested. State-changing methods must be listed explicitly. */
+      methods: z.array(z.enum(['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'])).min(1).default(['GET', 'HEAD', 'OPTIONS']),
+      checks: z.array(z.enum([
+        'not_a_server_error', 'status_code_conformance', 'content_type_conformance', 'response_headers_conformance', 'response_schema_conformance',
+        'negative_data_rejection', 'positive_data_acceptance', 'missing_required_header', 'unsupported_method', 'allow_header_conformance',
+        'use_after_free', 'ensure_resource_availability', 'ignored_auth', 'object_level_authorization',
+      ])).min(1).default(['not_a_server_error']),
+      phases: z.array(z.enum(['examples', 'coverage', 'fuzzing', 'stateful'])).min(1).default(['examples', 'coverage', 'fuzzing']),
+      maxExamples: z.number().int().min(1).max(1000).default(30),
+      requestTimeoutSec: z.number().min(0.5).max(120).default(5),
+      workers: z.number().int().min(1).max(8).default(1),
+      rateLimit: z.string().regex(/^\d+\/(s|m|h)$/).optional(),
+      seed: z.number().int().optional(),
+      /** Extra headers sent with every request (e.g. a test-account token). Values are redacted in stored evidence. */
+      headers: z.record(z.string()).default({}),
+      timeoutMs: z.number().int().min(10_000).max(60 * 60_000).default(600_000),
+      maxOutputBytes: z.number().int().min(64 * 1024).max(256 * 1024 * 1024).default(64 * 1024 * 1024),
+      /** Explicit executable path; otherwise `schemathesis` then `st` are searched on PATH. Nothing is installed. */
+      binary: z.string().optional(),
+    }).default({}),
+  }).default({}),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
