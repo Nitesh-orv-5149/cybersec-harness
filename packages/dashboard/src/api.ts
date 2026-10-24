@@ -19,11 +19,20 @@ export interface GraphResponse {
   baselineDiff: (GraphDiff & { impact: Impact | null }) | null;
 }
 
+export interface PackageInfo {
+  ecosystem: string; name: string; version: string | null; lockfile: string; lockfileNodes: string[];
+  affectedRanges: { tool: string; range: string }[]; fixedVersions: string[] | null;
+  direct: boolean | null; devOnly: boolean | null; declaredAs: string | null;
+  use: { evidence: string; label: string; summary: string; importers: string[]; callers: string[]; endpoints: string[]; introducedBy: { direct: string; chain: string[]; directEvidence: string }[] } | null;
+}
+
 export interface Finding {
-  _id: string; source: 'graph' | 'runtime'; category: string; classification: string; severity: 'high' | 'medium' | 'low' | 'info';
+  _id: string; source: 'graph' | 'runtime' | 'dependency'; category: string; classification: string; severity: 'high' | 'medium' | 'low' | 'info' | 'unknown';
+  labels?: string[]; ids?: string[]; canonicalId?: string; cwe?: string[]; scanners?: string[]; pkg?: PackageInfo; references?: string[];
+  potentialRegression?: boolean; confidenceNote?: string; resolution?: string;
   title: string; explanation: string[]; nodes: string[]; edges: string[]; paths: string[][];
   locations: { file: string; line: number }[]; evidence: Record<string, any>; suggestedNextStep: string;
-  confidence: string; limitations: string[]; affectedByChange?: boolean; status?: 'open' | 'resolved';
+  confidence: string; limitations: string[]; affectedByChange?: boolean; status?: 'open' | 'resolved' | 'not_currently_observed';
   scenario?: { id: string; name: string; viewport: string };
   correlation?: { status: string; changedNodes: string[]; exercised: string[]; paths: string[][]; changedAssets: string[]; reason: string };
   firstSeenAt?: string; lastSeenAt?: string; resolvedAt?: string | null; lastSeenBrowserRunId?: string;
@@ -47,6 +56,8 @@ export const api = {
 
 export const artifactUrl = (projectId: string, rel: string | null | undefined) =>
   rel ? `/api/projects/${projectId}/artifacts/${rel.split('/').map(encodeURIComponent).join('/')}` : '';
+
+export const TOOL_LABEL: Record<string, string> = { 'osv-api': 'OSV.dev (web API)', 'osv-scanner': 'OSV-Scanner', 'npm-audit': 'npm audit', trivy: 'Trivy' };
 
 export function shortId(id: string, n = 10) { return id.length > n ? id.slice(0, n) : id; }
 
