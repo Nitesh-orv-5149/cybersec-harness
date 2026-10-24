@@ -11,6 +11,7 @@ import { ProjectSession } from './project.js';
 import { GraphIndex, impactOf } from './analyzer/query.js';
 import { graphFindings } from './findings.js';
 import { browserAvailable } from './browser.js';
+import { newId } from './util.js';
 import { log } from './log.js';
 
 export class Service {
@@ -143,7 +144,11 @@ export class Service {
     app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));
 
     app.post('/api/projects/:id/security/dependency-scans', h(async (req, res) => {
-      const r = await this.session(req).deps.start('manual');
+      const { tools, trigger } = z.object({
+        tools: z.array(z.enum(['osv-api', 'npm-audit', 'osv-scanner', 'trivy'])).min(1).optional(),
+        trigger: z.enum(['manual', 'agent']).default('manual'),
+      }).parse(req.body ?? {});
+      const r = await this.session(req).deps.start(trigger, tools);
       res.status(202);
       return r;
     }));
@@ -163,6 +168,39 @@ export class Service {
     }));
 
     app.get('/api/projects/:id/security/summary', h(async (req) => this.store.dependencySummary(this.session(req).id)));
+
+    // ---- AI agent activity log (the LLM orchestrator reports its decisions and tool runs here) ----
+    app.post('/api/projects/:id/agent/events', h(async (req, res) => {
+      const s = this.session(req);
+      const body = z.object({
+        type: z.enum(['change', 'decision', 'tool_result', 'scan', 'info']),
+        endpoint: z.string().nullish(),
+        tool: z.string().nullish(),
+        severity: z.enum(['high', 'medium', 'low', 'info', 'unknown']).nullish(),
+        title: z.string().max(500),
+        detail: z.string().max(4000).nullish(),
+        data: z.record(z.unknown()).nullish(),
+      }).parse(req.body ?? {});
+      const doc = { _id: newId('age') as never, projectId: s.id, at: new Date(), ...body };
+      await this.store.col('agent_events').insertOne(doc);
+      this.broadcast({ kind: 'agent', projectId: s.id, at: new Date().toISOString() });
+      res.status(202);
+      return { id: doc._id };
+    }));
+
+    app.get('/api/projects/:id/agent/events', h(async (req) => {
+      const s = this.session(req);
+      const limit = Math.min(500, Number(req.query.limit) || 200);
+      const rows = await this.store.col('agent_events').find({ projectId: s.id }).sort({ at: -1 }).limit(limit).toArray();
+      return rows.reverse(); // oldest-first for a readable log
+    }));
+
+    app.post('/api/projects/:id/agent/events/clear', h(async (req) => {
+      const s = this.session(req);
+      const { deletedCount } = await this.store.col('agent_events').deleteMany({ projectId: s.id });
+      this.broadcast({ kind: 'agent', projectId: s.id, at: new Date().toISOString() });
+      return { deleted: deletedCount };
+    }));
 
     app.get('/api/projects/:id/findings/:fid/observations', h(async (req) => {
       const s = this.session(req);

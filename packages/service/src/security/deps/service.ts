@@ -93,11 +93,17 @@ export class DependencyScanService {
     return true;
   }
 
-  /** Starts a scan in the background and returns its id. Requires MongoDB (results must be persisted). */
-  async start(trigger = 'manual'): Promise<{ runId: string }> {
+  /** Starts a scan in the background and returns its id. Requires MongoDB (results must be persisted).
+   *  `tools` restricts the run to exactly those scanners (each one that is ready runs); omitted, the configured policy applies. */
+  async start(trigger = 'manual', tools?: ToolId[]): Promise<{ runId: string }> {
     if (this.job) throw Object.assign(new Error(`a dependency scan is already running (${this.job.runId})`), { status: 409 });
-    const cfg = this.ctx.cfg();
-    if (!cfg.dependencies.enabled) throw Object.assign(new Error('dependency scanning is disabled (security.dependencies.enabled = false)'), { status: 400 });
+    const base = this.ctx.cfg();
+    if (!base.dependencies.enabled) throw Object.assign(new Error('dependency scanning is disabled (security.dependencies.enabled = false)'), { status: 400 });
+    const notConfigured = (tools ?? []).filter((t) => !base.dependencies.order.includes(t));
+    if (notConfigured.length) throw Object.assign(new Error(`not listed in security.dependencies.order: ${notConfigured.join(', ')}`), { status: 400 });
+    const cfg: SecurityConfig = tools?.length
+      ? { ...base, dependencies: { ...base.dependencies, order: [...new Set(tools)], mode: 'all-available' } }
+      : base;
     const runs = this.ctx.store.col('security_scan_runs'); // throws StoreUnavailableError -> 503
     const runId = newId('sec');
     const startedAt = new Date();

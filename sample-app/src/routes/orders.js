@@ -14,6 +14,19 @@ router.get('/orders/:id/receipt', (req, res) => {
   res.json(orderService.receipt(order));
 });
 
+router.get('/orders/:id/export', (req, res) => {
+  const order = orderService.fetch(req.params.id);
+  if (!order) return res.status(404).json({ error: 'not found' });
+  res.json({ exported: true, order });
+});
+
+router.get('/orders/:id/cancel', (req, res) => {
+  // re-trigger
+  const order = orderService.fetch(req.params.id);
+  if (!order) return res.status(404).json({ error: 'not found' });
+  res.json({ cancelled: true, order });
+});
+
 function listOrders(req, res) {
   res.json(orderService.list());
 }
