@@ -223,6 +223,16 @@ const MEMORY_SCHEMA = {
   },
 };
 
+/** Build one index without ever taking down the whole Store: a bad index on one collection (e.g. stray
+ *  documents left over from a previous use of the collection name) is logged, not fatal. */
+async function safeIndex(db: Db, name: string, spec: Document, options?: Document) {
+  try {
+    await db.collection(name).createIndex(spec, options);
+  } catch (e) {
+    log.warn(`could not build index ${JSON.stringify(spec)} on ${name}: ${String((e as Error).message ?? e)}`);
+  }
+}
+
 async function applyValidator(db: Db, name: string, schema: object) {
   const validator = { $jsonSchema: schema as Document };
   try {
@@ -241,14 +251,14 @@ export async function ensureAgentMemory(db: Db) {
   await applyValidator(db, 'agent_events', EVENT_SCHEMA);
   await applyValidator(db, 'agent_memories', MEMORY_SCHEMA);
   await Promise.all([
-    db.collection('agent_runs').createIndex({ projectId: 1, startedAt: -1 }),
-    db.collection('agent_runs').createIndex({ projectId: 1, status: 1 }),
+    safeIndex(db, 'agent_runs', { projectId: 1, startedAt: -1 }),
+    safeIndex(db, 'agent_runs', { projectId: 1, status: 1 }),
     // (runId, seq) unique: the same step can never be recorded twice.
-    db.collection('agent_events').createIndex({ runId: 1, seq: 1 }, { unique: true }),
-    db.collection('agent_events').createIndex({ projectId: 1, type: 1, status: 1, at: -1 }),
-    db.collection('agent_memories').createIndex({ projectId: 1, status: 1, 'subject.key': 1 }),
-    db.collection('agent_memories').createIndex({ content: 'text' }),
+    safeIndex(db, 'agent_events', { runId: 1, seq: 1 }, { unique: true }),
+    safeIndex(db, 'agent_events', { projectId: 1, type: 1, status: 1, at: -1 }),
+    safeIndex(db, 'agent_memories', { projectId: 1, status: 1, 'subject.key': 1 }),
+    safeIndex(db, 'agent_memories', { content: 'text' }),
     // Optional short-lived memories: MongoDB deletes a document once its expiresAt has passed.
-    db.collection('agent_memories').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    safeIndex(db, 'agent_memories', { expiresAt: 1 }, { expireAfterSeconds: 0 }),
   ]);
 }
