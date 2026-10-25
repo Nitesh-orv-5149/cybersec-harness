@@ -3,7 +3,7 @@ import json
 import requests
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
-MODEL = "qwen3:4b-instruct-2507-q8_0"
+MODEL = "IHA089/drana-infinity-1.5b:1.5b"
 
 # Endpoint probes run locally against the running sample-app; dependency scanners are the real
 # tools the harness service runs against the project's lockfile and persists.
@@ -60,7 +60,7 @@ def choose_tools(endpoint: dict, available: list[str], memories: list[dict] | No
         res = requests.post(
             OLLAMA_URL,
             json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": False},
-            timeout=30,
+            timeout=60,
         )
         res.raise_for_status()
         content = res.json()["message"]["content"]
