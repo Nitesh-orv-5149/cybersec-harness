@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Ctx } from '../App';
 import { api, timeAgo } from '../api';
 
@@ -196,6 +196,7 @@ function StepBlock({ step }: { step: Step }) {
 export function AgentView({ ctx }: { ctx: Ctx }) {
   const [events, setEvents] = useState<AgentEvent[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     api.get<AgentEvent[]>(`/api/projects/${ctx.projectId}/agent/events?limit=500`)
@@ -208,6 +209,13 @@ export function AgentView({ ctx }: { ctx: Ctx }) {
   const lastAt = events && events.length ? events[events.length - 1].at : null;
   const running = !!ctx.status?.security?.dependencies?.job;
 
+  // Auto-scroll to bottom so the newest turn is in view immediately
+  useEffect(() => {
+    if (scrollRef.current && events && events.length > 0) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [events?.length]);
+
   if (err) return <div className="empty"><h2>Agent log unavailable</h2><p>{err}</p><p className="muted">The log is stored in MongoDB; it is paused while the store is unreachable.</p></div>;
   if (!events) return <div className="empty muted">Loading…</div>;
 
@@ -217,8 +225,14 @@ export function AgentView({ ctx }: { ctx: Ctx }) {
     setEvents([]);
   };
 
+  const jumpToLatest = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  };
+
   return (
-    <div className="scroll agent2">
+    <div className="scroll agent2" ref={scrollRef}>
       <div className="agent-bar">
         <span className="item"><span className={`dot ${running ? 'busy' : 'on'}`} />{running ? 'Investigating…' : 'Watching for changes'}</span>
         <span className="item muted">{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
@@ -226,6 +240,7 @@ export function AgentView({ ctx }: { ctx: Ctx }) {
         <span className="item" style={{ color: findings ? 'var(--bad)' : 'var(--muted)' }}>{findings} {findings === 1 ? 'vulnerability' : 'vulnerabilities'}</span>
         {lastAt && <span className="item muted">last {timeAgo(lastAt)}</span>}
         <span className="spacer" style={{ flex: 1 }} />
+        {turns.length > 1 && <button className="btn small" onClick={jumpToLatest} title="Scroll down to the most recent run">Jump to latest ↓</button>}
         {events.length > 0 && <button className="btn small" onClick={clear}>Clear</button>}
       </div>
 
