@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Ctx } from '../App';
 import { api, timeAgo } from '../api';
+import { ChartCard, Columns, HBars, SERIES, SEVERITY_COLOR } from '../charts';
 
 type Section = 'overview' | 'events' | 'analysis' | 'snapshots' | 'browser' | 'verification';
 
@@ -38,6 +39,7 @@ export function HistoryView({ ctx }: { ctx: Ctx }) {
               <div className="stat"><div className="n">{runsBy.completed ?? 0}<span className="muted small"> / {Object.values(runsBy).reduce((a: number, b: any) => a + Number(b), 0)}</span></div><div className="muted small">browser runs completed</div></div>
               <div className="stat"><div className="n">{h.summary.activity.reduce((a: number, b: any) => a + b.events, 0)}</div><div className="muted small">file events in the last 24h</div></div>
             </div>
+            <HistoryCharts h={h} />
             <div className="section">
               <h3>Scenario history</h3>
               <p className="small muted">Aggregated from every candidate browser result. Each bar is one run, oldest first.</p>
@@ -82,6 +84,27 @@ export function HistoryView({ ctx }: { ctx: Ctx }) {
           <tr key={v._id}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(v.at).toLocaleString()}</td><td>{v.notes}<div className="mono small faint">{v.findingId}</div></td><td>{v.action.replace(/_/g, ' ')}</td><td className="muted">{v.result}</td><td className="mono small faint">{v.browserRunId ?? v.analysisRunId}</td></tr>
         ))}</tbody></table>}
       </div>
+    </div>
+  );
+}
+
+/** Analysis-run outcomes over time and pass/fail per browser scenario. */
+function HistoryCharts({ h }: { h: any }) {
+  const runs = (h.analysisRuns ?? []).slice(0, 30).reverse().map((r: any, i: number) => ({
+    key: r._id, tick: `#${i + 1}`, title: `${new Date(r.startedAt).toLocaleString()} · ${r.trigger}`,
+    values: { changed: r.summary?.changedNodes ?? 0, added: r.summary?.addedNodes ?? 0 },
+  }));
+  const scen = (h.scenarioHistory ?? []).map((s: any) => ({ key: s.scenarioId + s.viewport, label: `${s.scenarioName} · ${s.viewport}`, values: { passed: s.passed, failed: s.failed } }));
+  return (
+    <div className="charts-row">
+      <ChartCard title="Graph changes per analysis run" sub={`Nodes changed and added, last ${runs.length} runs`}
+        table={{ head: ['Run', 'When', 'Changed', 'Added'], rows: runs.map((r: any) => [r.tick, r.title, r.values.changed, r.values.added]) }}>
+        <Columns buckets={runs} series={[{ key: 'changed', label: 'Changed', color: SERIES[1] }, { key: 'added', label: 'Added', color: SERIES[0] }]} height={170} />
+      </ChartCard>
+      <ChartCard title="Browser scenario results" sub="Passed and failed checks per scenario"
+        table={{ head: ['Scenario', 'Passed', 'Failed'], rows: scen.map((s: any) => [s.label, s.values.passed, s.values.failed]) }}>
+        {scen.length ? <HBars rows={scen} series={[{ key: 'passed', label: 'Passed', color: '#0ca30c' }, { key: 'failed', label: 'Failed', color: SEVERITY_COLOR.high }]} /> : <p className="chart-empty">No browser results yet.</p>}
+      </ChartCard>
     </div>
   );
 }

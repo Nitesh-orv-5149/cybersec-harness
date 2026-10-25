@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Ctx } from '../App';
+import { TerminalLine } from '../TerminalLine';
 import { api, timeAgo } from '../api';
 
 interface AgentEvent {
@@ -64,6 +65,12 @@ const STATUS_TONE: Record<string, string> = {
 // Display label only — the underlying status value ('finding') is unchanged elsewhere (data model, filters).
 const STATUS_LABEL: Record<string, string> = { finding: 'vulnerability', findings: 'vulnerabilities' };
 
+const MemoryIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" />
+  </svg>
+);
+
 function MemoryCall({ e }: { e: AgentEvent }) {
   const [open, setOpen] = useState(false);
   const data = e.data || {};
@@ -77,7 +84,7 @@ function MemoryCall({ e }: { e: AgentEvent }) {
     <div className={`call call-memory tone-${tone}`}>
       <button className="call-head" onClick={() => hasDetails && setOpen((o) => !o)} aria-expanded={open}>
         <span className="call-caret">{hasDetails ? (open ? '▾' : '▸') : '·'}</span>
-        <span className="call-icon">🧠</span>
+        <span className="call-icon"><MemoryIcon /></span>
         <span className="call-fn fn-memory">memory</span>
         <span className="call-msg">{e.title.replace(/^memory:\s*/, '')}</span>
         <span className="spacer" style={{ flex: 1 }} />
@@ -154,7 +161,7 @@ function ToolCall({ e }: { e: AgentEvent }) {
         {e.severity && e.severity !== 'info' && e.severity !== 'unknown' && <span className={`chip sev-${e.severity}`}>{e.severity}</span>}
         {mem?.verdict && (
           <span className="mem-badge" title={`Persisted to agent memory as [${mem.verdict}]${mem.ttl ? ` (ttl: ${mem.ttl})` : ''}`}>
-            🧠 saved [{mem.verdict}]
+            <MemoryIcon /> saved [{mem.verdict}]
           </span>
         )}
         <span className="spacer" style={{ flex: 1 }} />
@@ -230,9 +237,14 @@ export function AgentView({ ctx }: { ctx: Ctx }) {
       </div>
 
       {turns.length === 0 ? (
-        <div className="empty muted" style={{ padding: 40 }}>
-          <p>The agent hasn’t done anything yet.</p>
-          <p className="small">Start it with <code>packages/orchestrator/.venv/bin/python packages/orchestrator/main.py</code> and edit a watched source file — its work will stream here like a coding agent’s transcript.</p>
+        <div className="onboard">
+          <div className="onboard-icon"><MemoryIcon /></div>
+          <h2>The agent hasn’t done anything yet</h2>
+          <p className="muted">Its decisions and tool runs stream here like a coding agent’s transcript.</p>
+          <ol className="onboard-steps">
+            <li><span>Start the orchestrator</span><TerminalLine cmd="packages/orchestrator/.venv/bin/python packages/orchestrator/main.py" /></li>
+            <li><span>Edit a watched route, e.g. <code>sample-app/src/routes/orders.js</code>. The agent wakes within about a second.</span></li>
+          </ol>
         </div>
       ) : (
         <div className="transcript">

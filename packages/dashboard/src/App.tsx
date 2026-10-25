@@ -8,8 +8,12 @@ import { HistoryView } from './views/HistoryView';
 import { SecurityView } from './views/SecurityView';
 import { AgentView } from './views/AgentView';
 import { ScansView } from './views/ScansView';
+import { OverviewView } from './views/OverviewView';
+import { Icon, Logo } from './icons';
+import { type Command, CommandPalette } from './CommandPalette';
+import { TerminalLine } from './TerminalLine';
 
-export type Tab = 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'scans' | 'agent' | 'history';
+export type Tab = 'overview' | 'graph' | 'issues' | 'reach' | 'compare' | 'security' | 'scans' | 'agent' | 'history';
 
 export interface Selection { nodeId: string | null; path: string[] | null; from?: string }
 
@@ -23,23 +27,26 @@ export interface Ctx {
   refreshStatus: () => void;
 }
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'graph', label: 'Code graph' },
-  { id: 'issues', label: 'Findings' },
-  { id: 'reach', label: 'Reachability' },
-  { id: 'compare', label: 'Website comparison' },
-  { id: 'security', label: 'Dependency scan' },
-  { id: 'scans', label: 'Security tools' },
-  { id: 'agent', label: 'AI agent' },
-  { id: 'history', label: 'History' },
+const TABS: { id: Tab; label: string; group: 'Analyze' | 'Secure' | 'Activity'; icon: () => JSX.Element }[] = [
+  { id: 'overview', label: 'Overview', group: 'Analyze', icon: Icon.overview },
+  { id: 'graph', label: 'Code graph', group: 'Analyze', icon: Icon.graph },
+  { id: 'issues', label: 'Findings', group: 'Analyze', icon: Icon.findings },
+  { id: 'reach', label: 'Reachability', group: 'Analyze', icon: Icon.reach },
+  { id: 'compare', label: 'Website comparison', group: 'Analyze', icon: Icon.compare },
+  { id: 'security', label: 'Dependency scan', group: 'Secure', icon: Icon.security },
+  { id: 'scans', label: 'Security tools', group: 'Secure', icon: Icon.scans },
+  { id: 'agent', label: 'AI agent', group: 'Activity', icon: Icon.agent },
+  { id: 'history', label: 'History', group: 'Activity', icon: Icon.history },
 ];
+const isMac = typeof navigator !== 'undefined' && /Mac|iP(hone|ad)/.test(navigator.platform);
+const MOD = isMac ? '⌘' : 'Ctrl';
 
 export function App() {
   const [projects, setProjects] = useState<any[] | null>(null);
   const [projectId, setProjectId] = useState<string | null>(new URLSearchParams(location.search).get('project'));
   const [status, setStatus] = useState<any>(null);
   const [graph, setGraph] = useState<GraphResponse | null>(null);
-  const [tab, setTab] = useState<Tab>((new URLSearchParams(location.search).get('tab') as Tab) || 'graph');
+  const [tab, setTab] = useState<Tab>((new URLSearchParams(location.search).get('tab') as Tab) || 'overview');
   const [selection, setSelection] = useState<Selection>({ nodeId: null, path: null });
   const [ticks, setTicks] = useState<Record<string, number>>({});
   const [connError, setConnError] = useState<string | null>(null);
@@ -105,41 +112,103 @@ export function App() {
 
   const select = useCallback((s: Selection, goTo?: Tab) => { setSelection(s); if (goTo) setTab(goTo); }, []);
 
+  // Deep links: keep ?project= and ?tab= in the URL so a view can be shared or reloaded.
+  useEffect(() => {
+    const u = new URL(location.href);
+    u.searchParams.set('tab', tab);
+    if (projectId) u.searchParams.set('project', projectId);
+    history.replaceState(null, '', u);
+  }, [tab, projectId]);
+
+  // Keyboard: ⌘K / Ctrl+K opens the palette; 1–9 jump to a view when not typing.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen((o) => !o); return; }
+      const el = e.target as HTMLElement;
+      if (e.metaKey || e.ctrlKey || e.altKey || el.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= TABS.length) setTab(TABS[n - 1].id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const commands = useMemo<Command[]>(() => [
+    ...TABS.map((t, i) => ({ id: `go-${t.id}`, label: t.label, group: 'Go to', icon: <t.icon />, hint: String(i + 1), run: () => setTab(t.id) })),
+    ...(projects ?? []).filter((p) => p.id !== projectId).map((p) => ({
+      id: `proj-${p.id}`, label: `Switch to ${p.name}`, group: 'Projects', icon: <Icon.folder />,
+      run: () => { setProjectId(p.id); setSelection({ nodeId: null, path: null }); },
+    })),
+    { id: 'reload', label: 'Refresh status', group: 'Actions', icon: <Icon.history />, run: () => refreshStatus() },
+    { id: 'copy-link', label: 'Copy link to this view', group: 'Actions', icon: <Icon.copy />, run: () => { navigator.clipboard?.writeText(location.href).catch(() => {}); } },
+  ], [projects, projectId, refreshStatus]);
+
   const ctx = useMemo<Ctx | null>(() => projectId ? { projectId, status, graph, ticks, selection, select, refreshStatus } : null,
     [projectId, status, graph, ticks, selection, select, refreshStatus]);
 
   if (connError && !status) {
-    return <div className="empty"><h2>Can’t reach the local analysis service</h2><p>{connError}</p><p className="muted">Start it with <code>npm start -- --project ./your-app</code> and reload this page.</p></div>;
+    return <Splash title="Can’t reach the local analysis service" detail={connError} cmd="npm start -- --project ./your-app" note="Start the service, then reload this page." />;
   }
   if (projects && projects.length === 0) {
-    return <div className="empty"><h2>No project is being monitored</h2><p>Open a folder from the editor extension, or start the service with <code>--project ./path</code>.</p></div>;
+    return <Splash title="No project is being monitored" detail="Open a folder from the editor extension, or start the service with a project path." cmd="npm start -- --project ./path" />;
   }
-  if (!ctx || !status) return <div className="empty muted">Loading…</div>;
+  if (!ctx || !status) return <div className="splash"><div className="splash-card"><Logo size={40} /><div className="loader" aria-label="Loading" /></div></div>;
 
   const job = status.browser?.job;
+  const scanning = (t: Tab): string | null => {
+    if (t === 'compare') return job ? job.status.replace('_', ' ') : status.security?.web?.job ? 'scanning' : null;
+    if (t === 'security') return status.security?.dependencies?.job ? 'scanning' : null;
+    if (t === 'scans') return (status.security?.web?.job || Object.values(status.security?.scans ?? {}).some((k: any) => k?.job)) ? 'scanning' : null;
+    return null;
+  };
+  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
+
   return (
     <div className="shell">
-      <StatusBar status={status} projects={projects ?? []} onProject={(id) => { setProjectId(id); setSelection({ nodeId: null, path: null }); }} />
-      <div>
+      <aside className="sidebar">
+        <div className="brand">
+          <Logo />
+          <div className="brand-text"><span className="brand-name">workbench</span><span className="brand-sub">code impact · security</span></div>
+        </div>
+
+        <button className="search-trigger" onClick={() => setPaletteOpen(true)}>
+          <Icon.search /><span>Search…</span><kbd>{MOD} K</kbd>
+        </button>
+
+        <nav className="nav" aria-label="Views">
+          {(['Analyze', 'Secure', 'Activity'] as const).map((g) => (
+            <div className="nav-group" key={g}>
+              <div className="nav-label">{g}</div>
+              {TABS.filter((t) => t.group === g).map((t) => {
+                const busy = scanning(t.id);
+                return (
+                  <button key={t.id} className="nav-item" aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)} title={`${t.label} (${TABS.indexOf(t) + 1})`}>
+                    <span className="nav-icon"><t.icon /></span>
+                    <span className="nav-text">{t.label}</span>
+                    {t.id === 'issues' && openFindings > 0 && <span className="count bad">{openFindings}</span>}
+                    {busy && <span className="count live"><i className="pulse-dot" />{busy}</span>}
+                    {!busy && !(t.id === 'issues' && openFindings > 0) && <kbd className="nav-kbd">{TABS.indexOf(t) + 1}</kbd>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <SystemHealth status={status} />
+      </aside>
+
+      <div className="main">
+        <TopBar status={status} projects={projects ?? []} section={current.label}
+          onProject={(id) => { setProjectId(id); setSelection({ nodeId: null, path: null }); }} />
         {!status.store.available && <div className="banner">MongoDB is unavailable ({status.store.error ?? 'no connection'}). The live graph still updates; history, findings and verification are paused until it reconnects.</div>}
         {status.config.error && <div className="banner">{status.config.error}</div>}
         {(status.config.warnings ?? []).map((w: string, i: number) => <div key={i} className="banner" style={{ opacity: 0.85 }}>{w}</div>)}
         {status.analysis.status === 'failed' && <div className="banner">Last analysis failed: {status.analysis.error}. The graph shown is from the previous successful analysis.</div>}
         {status.unsavedBuffers.length > 0 && <div className="banner warn">Unsaved editor changes in {status.unsavedBuffers.join(', ')} are reflected in the graph (dashed outline) but not in any website run.</div>}
-        <nav className="tabs" role="tablist">
-          {TABS.map((t) => (
-            <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
-              {t.label}
-              {t.id === 'issues' && openFindings > 0 && <span className="count bad">{openFindings}</span>}
-              {t.id === 'compare' && job && <span className="count">{job.status.replace('_', ' ')}</span>}
-              {t.id === 'compare' && !job && status.security?.web?.job && <span className="count">security scan</span>}
-              {t.id === 'security' && status.security?.dependencies?.job && <span className="count">scanning</span>}
-              {t.id === 'scans' && (status.security?.web?.job || Object.values(status.security?.scans ?? {}).some((k: any) => k?.job)) && <span className="count">scanning</span>}
-            </button>
-          ))}
-        </nav>
-      </div>
-      <main className={`view ${tab}`}>
+      <main className={`view ${tab}`} key={tab}>
+        {tab === 'overview' && <OverviewView ctx={ctx} goFindings={() => setTab('issues')} />}
         {tab === 'graph' && <GraphView ctx={ctx} />}
         {tab === 'issues' && <IssuesView ctx={ctx} />}
         {tab === 'reach' && <ReachabilityView ctx={ctx} />}
@@ -149,29 +218,75 @@ export function App() {
         {tab === 'agent' && <AgentView ctx={ctx} />}
         {tab === 'history' && <HistoryView ctx={ctx} />}
       </main>
+      </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
     </div>
   );
 }
 
-function StatusBar({ status, projects, onProject }: { status: any; projects: any[]; onProject: (id: string) => void }) {
+function TopBar({ status, projects, section, onProject }: { status: any; projects: any[]; section: string; onProject: (id: string) => void }) {
   const a = status.analysis.status;
   const live = status.live;
   return (
-    <header className="status">
-      {projects.length > 1 ? (
-        <select className="input" style={{ width: 'auto' }} value={status.id} onChange={(e) => onProject(e.target.value)} aria-label="Project">
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-      ) : <span className="project" title={status.root}>{status.name}</span>}
-      <span className="item"><span className={`dot ${status.monitoring ? 'on' : 'off'}`} />{status.monitoring ? 'Watching files' : 'Not watching'}</span>
-      <span className="item"><span className={`dot ${a === 'idle' ? 'on' : a === 'failed' ? 'off' : 'busy'}`} />Analysis <b>{a}</b></span>
-      {live && <span className="item" title={`Source hash ${live.sourceHash}`}>Source <b className="mono">{live.sourceHash.slice(0, 8)}</b> {timeAgo(live.analyzedAt)}</span>}
-      {live?.lastChangedFiles?.length > 0 && <span className="item">Last change <b className="mono">{live.lastChangedFiles.slice(0, 2).join(', ')}</b></span>}
-      <span className="item" title={status.baseline?.contentHash}>Baseline <b className="mono">{status.baseline ? status.baseline.snapshotId.replace('snap_', '').slice(0, 8) : 'not set'}</b></span>
+    <header className="topbar">
+      <div className="crumbs">
+        <Icon.folder />
+        {projects.length > 1 ? (
+          <select className="crumb-select" value={status.id} onChange={(e) => onProject(e.target.value)} aria-label="Project">
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        ) : <span className="crumb-project" title={status.root}>{status.name}</span>}
+        <span className="crumb-sep">/</span>
+        <span className="crumb-page">{section}</span>
+      </div>
       <span className="spacer" />
-      <span className="item">{status.parser.provider}</span>
-      <span className="item"><span className={`dot ${status.browser.available.ok ? 'on' : 'off'}`} />Browser</span>
-      <span className="item"><span className={`dot ${status.store.available ? 'on' : 'off'}`} />MongoDB</span>
+      <div className="pills">
+        <span className={`pill ${status.monitoring ? 'pill-live' : 'pill-off'}`} title={status.root}>
+          <i className="pulse-dot" />{status.monitoring ? 'Live' : 'Paused'}
+        </span>
+        <span className={`pill ${a === 'idle' ? '' : a === 'failed' ? 'pill-bad' : 'pill-busy'}`}>analysis <b>{a}</b></span>
+        {live && (
+          <span className="pill mono" title={`Source hash ${live.sourceHash}${live.lastChangedFiles?.length ? `\nLast change: ${live.lastChangedFiles.join(', ')}` : ''}`}>
+            <Icon.git /><b>{live.sourceHash.slice(0, 7)}</b><span className="faint">{timeAgo(live.analyzedAt)}</span>
+          </span>
+        )}
+        <span className="pill mono" title={status.baseline?.contentHash ?? 'No baseline set'}>
+          base <b>{status.baseline ? status.baseline.snapshotId.replace('snap_', '').slice(0, 7) : '—'}</b>
+        </span>
+      </div>
     </header>
+  );
+}
+
+function SystemHealth({ status }: { status: any }) {
+  const rows: [string, boolean, string?][] = [
+    ['File watcher', !!status.monitoring],
+    ['Browser', !!status.browser.available.ok, status.browser.available.reason],
+    ['MongoDB', !!status.store.available, status.store.error],
+  ];
+  return (
+    <div className="health">
+      <div className="nav-label">System</div>
+      {rows.map(([name, ok, why]) => (
+        <div className="health-row" key={name} title={ok ? 'Operational' : why ?? 'Unavailable'}>
+          <span className={`dot ${ok ? 'on' : 'off'}`} /><span>{name}</span><span className="health-state">{ok ? 'ok' : 'down'}</span>
+        </div>
+      ))}
+      <div className="health-foot mono">{status.parser.provider}</div>
+    </div>
+  );
+}
+
+function Splash({ title, detail, cmd, note }: { title: string; detail: string; cmd: string; note?: string }) {
+  return (
+    <div className="splash">
+      <div className="splash-card">
+        <Logo size={40} />
+        <h2>{title}</h2>
+        <p className="muted">{detail}</p>
+        <TerminalLine cmd={cmd} />
+        {note && <p className="faint small">{note}</p>}
+      </div>
+    </div>
   );
 }

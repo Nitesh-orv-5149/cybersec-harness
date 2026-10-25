@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Ctx } from '../App';
 import { api, artifactUrl, timeAgo, TOOL_LABEL, type Finding } from '../api';
+import { ChartCard, Columns, HBars, SERIES, SEVERITY_COLOR, SEVERITY_ORDER } from '../charts';
+import { Icon } from '../icons';
 
 const STATE_LABEL: Record<string, string> = {
   ready: 'ready', not_installed: 'not installed', not_functional: 'not working', needs_network: 'needs network permission', unreachable: 'service unreachable', disabled: 'disabled',
@@ -87,6 +89,8 @@ export function SecurityView({ ctx }: { ctx: Ctx }) {
         </div>
 
         {!storeUp && <div className="empty">MongoDB is unavailable, so scan history and findings cannot be shown or stored. Scanner availability above is still checked live.</div>}
+
+        {storeUp && runs && runs.some((r) => r.status !== 'running') && <DependencyCharts runs={runs} open={open} />}
 
         {storeUp && last && <LastRun run={last} ctx={ctx} />}
         {storeUp && runs && !runs.length && !running && <p className="muted">No dependency scan has run for this project yet.</p>}
@@ -182,6 +186,47 @@ function LastRun({ run, ctx }: { run: any; ctx: Ctx }) {
           </tr>
         ))}</tbody>
       </table>
+    </div>
+  );
+}
+
+/** Advisories per scanner on the latest run, and advisories found per run over time. */
+function DependencyCharts({ runs, open }: { runs: any[]; open: Finding[] }) {
+  const done = runs.filter((r) => r.status !== 'running');
+  const last = done[0];
+  const perTool = (last?.tools ?? []).map((t: any) => ({ key: t.tool, label: TOOL_LABEL[t.tool] ?? t.tool, values: { n: t.observationCount ?? 0 } }));
+  const sev = SEVERITY_ORDER.map((k) => ({ key: k, label: k, color: SEVERITY_COLOR[k] }));
+  const sevRows = [{ key: 'open', label: 'Open findings', values: Object.fromEntries(SEVERITY_ORDER.map((k) => [k, open.filter((f) => f.severity === k).length])) }];
+  const timeline = done.slice(0, 20).reverse().map((r) => ({
+    key: r._id, tick: new Date(r.startedAt).toLocaleDateString([], { month: 'short', day: 'numeric' }), title: new Date(r.startedAt).toLocaleString(),
+    values: { n: (r.tools ?? []).reduce((a: number, t: any) => a + (t.observationCount ?? 0), 0) },
+  }));
+  if (timeline.every((t) => t.values.n === 0) && !open.length) {
+    return (
+      <div className="clean-state glass">
+        <span className="clean-icon"><Icon.check /></span>
+        <div>
+          <b>No advisories in the last {timeline.length} completed scan{timeline.length === 1 ? '' : 's'}</b>
+          <p className="small muted">{perTool.length} scanner{perTool.length === 1 ? '' : 's'} ran on the latest scan ({perTool.map((t: any) => t.label).join(', ')}), {timeAgo(last?.startedAt)}. Charts appear here once a scan reports an advisory.</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="charts-row">
+      <ChartCard title="Advisories per scanner" sub={`Latest run · ${timeAgo(last?.startedAt)}`}
+        table={{ head: ['Scanner', 'Advisories'], rows: perTool.map((t: any) => [t.label, t.values.n]) }}>
+        {perTool.length ? <HBars rows={perTool} series={[{ key: 'n', label: 'Advisories', color: SERIES[0] }]} /> : <p className="chart-empty">No scanner results on the latest run.</p>}
+      </ChartCard>
+      <ChartCard title="Advisories found per run" sub={`Last ${timeline.length} completed scans, oldest first`}
+        table={{ head: ['When', 'Advisories'], rows: timeline.map((t) => [t.title, t.values.n]) }}>
+        <Columns buckets={timeline} series={[{ key: 'n', label: 'Advisories', color: SERIES[0] }]} height={160} />
+      </ChartCard>
+      {open.length > 0 && (
+        <ChartCard title="Open dependency findings by severity" wide table={{ head: ['Severity', 'Count'], rows: SEVERITY_ORDER.map((k) => [k, sevRows[0].values[k]]) }}>
+          <HBars rows={sevRows} series={sev} />
+        </ChartCard>
+      )}
     </div>
   );
 }
