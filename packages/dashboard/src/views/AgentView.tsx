@@ -47,6 +47,8 @@ const STATUS_TONE: Record<string, string> = {
   finding: 'bad', findings: 'bad', failed: 'bad', error: 'bad',
   clean: 'ok', skipped: 'faint', run: 'muted',
 };
+// Display label only — the underlying status value ('finding') is unchanged elsewhere (data model, filters).
+const STATUS_LABEL: Record<string, string> = { finding: 'vulnerability', findings: 'vulnerabilities' };
 
 function ToolCall({ e }: { e: AgentEvent }) {
   const [open, setOpen] = useState(false);
@@ -62,7 +64,7 @@ function ToolCall({ e }: { e: AgentEvent }) {
         <span className="call-msg">{e.title.replace(new RegExp(`^${name}:\\s*`), '')}</span>
         {e.severity && e.severity !== 'info' && e.severity !== 'unknown' && <span className={`chip sev-${e.severity}`}>{e.severity}</span>}
         <span className="spacer" style={{ flex: 1 }} />
-        <span className={`call-status st-${tone}`}>{status}</span>
+        <span className={`call-status st-${tone}`}>{STATUS_LABEL[status] ?? status}</span>
       </button>
       {open && hasData && <pre className="call-out">{JSON.stringify(e.data, null, 2)}</pre>}
     </div>
@@ -121,7 +123,7 @@ export function AgentView({ ctx }: { ctx: Ctx }) {
         <span className="item"><span className={`dot ${running ? 'busy' : 'on'}`} />{running ? 'Investigating…' : 'Watching for changes'}</span>
         <span className="item muted">{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
         <span className="item muted">{events.length} steps</span>
-        <span className="item" style={{ color: findings ? 'var(--bad)' : 'var(--muted)' }}>{findings} finding{findings === 1 ? '' : 's'}</span>
+        <span className="item" style={{ color: findings ? 'var(--bad)' : 'var(--muted)' }}>{findings} {findings === 1 ? 'vulnerability' : 'vulnerabilities'}</span>
         {lastAt && <span className="item muted">last {timeAgo(lastAt)}</span>}
         <span className="spacer" style={{ flex: 1 }} />
         {events.length > 0 && <button className="btn small" onClick={clear}>Clear</button>}
