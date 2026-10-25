@@ -17,9 +17,9 @@ import asyncio
 import json
 import websockets
 
+import agent_memory
 import harness
 import llm
-import memory
 import tools
 from llm import ENDPOINT_TOOLS, DEPENDENCY_TOOLS
 
@@ -33,29 +33,53 @@ def available_tools(project_id: str) -> list[str]:
 def investigate(project_id: str, endpoint: dict, available: list[str], run_deps: bool) -> None:
     ep = f"{endpoint['method']} {endpoint['path']}"
     print(f"\n=== change detected: {ep} ===")
-    chosen, reason = llm.choose_tools(endpoint, available)
+
+    # Deterministic skip: a tool with an active [clean] memory for this exact endpoint is never
+    # re-asked about — this is a code-level gate, not something left to the LLM's judgment (a
+    # live test found the LLM does not reliably map a memory's prose back to the right tool).
+    candidate_probe_tools = []
+    for name in sorted(ENDPOINT_TOOLS & set(available)):
+        key = f"{name}|{ep}"
+        if agent_memory.already_clean(project_id, "endpoint", key):
+            print(f"[{name}] already clean for {ep} (memory), skipping")
+            harness.log_event(project_id, "tool_result", f"{name}: skipped (memory: already clean)",
+                              endpoint=ep, tool=name, data={"status": "skipped"})
+        else:
+            candidate_probe_tools.append(name)
+    available = [t for t in available if t not in (ENDPOINT_TOOLS - set(candidate_probe_tools))]
+
+    run = agent_memory.start_run(project_id, f"Investigate {ep}", subject={"endpointPath": endpoint["path"]})
+    memories = []
+    for name in candidate_probe_tools:
+        memories += [m for m in agent_memory.recall(project_id, "endpoint", f"{name}|{ep}") if m["content"].startswith("[finding]")]
+    agent_memory.log_step(project_id, run["_id"], "memory_read", outputSummary=f"{len(memories)} finding memory(ies) recalled")
+
+    chosen, reason = llm.choose_tools(endpoint, available, memories)
     print(f"[llm] chose tools: {chosen} ({reason})")
+    agent_memory.log_step(project_id, run["_id"], "decision", outputSummary=f"chose {chosen} ({reason})")
     harness.log_event(project_id, "decision", f"Chose {len(chosen)} tool(s) for {ep}",
                       endpoint=ep, detail=reason, data={"available": available, "chosen": chosen, "reason": reason})
 
-    # endpoint probes: one finding each, deduped per (tool, endpoint)
+    # endpoint probes: record every outcome as a memory, clean or finding
     for name in [c for c in chosen if c in ENDPOINT_TOOLS]:
-        if memory.already_found(name, endpoint["path"]):
-            print(f"[{name}] already reported for {endpoint['path']}, skipping")
-            harness.log_event(project_id, "tool_result", f"{name}: already reported, skipped",
-                              endpoint=ep, tool=name, data={"status": "skipped"})
-            continue
+        key = f"{name}|{ep}"
         result = tools.TOOLS[name](endpoint)
         if result is None:
             print(f"[{name}] nothing found")
+            agent_memory.remember(project_id, run["_id"], "endpoint", key, "clean", "ran, nothing found", ttl_hours=24 * 7)
+            agent_memory.log_step(project_id, run["_id"], "tool_call", tool=name, status="ok", outputSummary="clean")
             harness.log_event(project_id, "tool_result", f"{name}: nothing found",
                               endpoint=ep, tool=name, data={"status": "clean"})
             continue
-        saved = memory.insert_one(result)
-        print(f"[{name}] FINDING: {saved['summary']} (severity={saved.get('severity')})")
-        harness.log_event(project_id, "tool_result", f"{name}: {saved['summary']}",
-                          endpoint=ep, tool=name, severity=saved.get("severity"),
-                          data={"status": "finding", **saved})
+        agent_memory.remember(project_id, run["_id"], "endpoint", key, "finding", result["summary"],
+                               confidence="medium", evidence=[{"kind": "event", "id": run["_id"]}])
+        agent_memory.log_step(project_id, run["_id"], "tool_call", tool=name, status="ok", outputSummary=result["summary"])
+        print(f"[{name}] FINDING: {result['summary']} (severity={result.get('severity')})")
+        harness.log_event(project_id, "tool_result", f"{name}: {result['summary']}",
+                          endpoint=ep, tool=name, severity=result.get("severity"),
+                          data={"status": "finding", **result})
+
+    agent_memory.finish_run(project_id, run["_id"], "completed", summary=f"ran {chosen}")
 
     # dependency scanners: run the chosen real tools in one harness scan (project-wide, not per-endpoint)
     dep_tools = [c for c in chosen if c in DEPENDENCY_TOOLS]
