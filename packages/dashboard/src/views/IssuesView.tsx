@@ -5,6 +5,8 @@ import { whereOf } from './ScansView';
 import { Index } from '../graphUtil';
 import { PathChain } from './GraphView';
 import { WebFindingEvidence } from './WebSecurityPanel';
+import { SEVERITY_COLOR, SEVERITY_ORDER } from '../charts';
+import { Icon } from '../icons';
 
 const CLASS_LABEL: Record<string, string> = {
   security_sensitive_path: 'Security-sensitive path',
@@ -29,9 +31,13 @@ const WEB_ACTION_LABEL: Record<string, string> = {
   observed: 'First matched by nuclei', not_currently_observed: 'Not matched by a completed re-scan of the same target', potential_regression: 'Matched again (potential regression)',
 };
 
+const STATUS_TABS: [Status, string][] = [['open', 'Open'], ['not_currently_observed', 'Unobserved'], ['resolved', 'Resolved'], ['all', 'All']];
+type Status = 'open' | 'resolved' | 'not_currently_observed' | 'all';
+
 export function IssuesView({ ctx }: { ctx: Ctx }) {
-  const [status, setStatus] = useState<'open' | 'resolved' | 'not_currently_observed' | 'all'>('open');
+  const [status, setStatus] = useState<Status>('open');
   const [source, setSource] = useState<string>('all');
+  const [query, setQuery] = useState('');
   const [items, setItems] = useState<Finding[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [current, setCurrent] = useState<string | null>(null);
@@ -47,8 +53,11 @@ export function IssuesView({ ctx }: { ctx: Ctx }) {
     api.get<Finding[]>(`/api/projects/${ctx.projectId}/findings${status === 'all' ? '' : `?status=${status}`}`)
       .then((r) => { setItems(r); setErr(null); }).catch((e) => setErr(e.message));
   }, [ctx.projectId, status, ctx.ticks.findings]);
-  const shown = (items ?? []).filter((f) => source === 'all' || f.source === source);
-  const sel = shown.find((f) => f._id === current) ?? shown[0];
+  const needle = query.trim().toLowerCase();
+  const shown = (items ?? []).filter((f) => (source === 'all' || f.source === source) && (!needle || `${f.title} ${f.locations.map((l) => l.file).join(' ')}`.toLowerCase().includes(needle)));
+  const groups = SEVERITY_ORDER.map((sev) => [sev, shown.filter((f) => f.severity === sev)] as const).filter(([, list]) => list.length);
+  const ordered = groups.flatMap(([, list]) => list);
+  const sel = ordered.find((f) => f._id === current) ?? ordered[0];
   useEffect(() => {
     if (!sel) { setDetail(null); return; }
     api.get<{ finding: Finding; records: any[] }>(`/api/projects/${ctx.projectId}/findings/${sel._id}`).then(setDetail).catch(() => setDetail(null));
@@ -56,91 +65,183 @@ export function IssuesView({ ctx }: { ctx: Ctx }) {
 
   if (err) return <div className="empty"><h2>Findings unavailable</h2><p>{err}</p></div>;
   if (!items || !index) return <div className="empty muted">Loading…</div>;
+  const sources = [...new Set(items.map((f) => f.source))];
 
   return (
-    <div className="split">
-      <div className="master">
-        <div className="toolbar">
-          <select className="input" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value as any)} aria-label="Status">
-            <option value="open">Open</option><option value="not_currently_observed">Not currently observed</option><option value="resolved">Resolved</option><option value="all">All</option>
-          </select>
-          <select className="input" style={{ width: 'auto' }} value={source} onChange={(e) => setSource(e.target.value as any)} aria-label="Source">
-            <option value="all">All sources</option>{Object.entries(SOURCE_NAME).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <span className="muted small">{shown.length}</span>
+    <div className="findings">
+      <aside className="f-list" aria-label="Findings">
+        <div className="f-list-head">
+          <div className="f-filters">
+            <label className="f-search"><Icon.search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by title or file" aria-label="Filter findings" /></label>
+            <select className="input f-source" value={source} onChange={(e) => setSource(e.target.value)} aria-label="Source">
+              <option value="all">All sources</option>{sources.map((k) => <option key={k} value={k}>{SOURCE_NAME[k] ?? k}</option>)}
+            </select>
+          </div>
+          <div className="seg f-status" role="group" aria-label="Status">
+            {STATUS_TABS.map(([id, label]) => <button key={id} aria-pressed={status === id} onClick={() => setStatus(id)}>{label}</button>)}
+          </div>
         </div>
-        {!shown.length && <div className="empty">{status === 'open' ? 'No open findings for this filter.' : 'Nothing here yet.'}</div>}
-        {shown.map((f) => (
-          <button key={f._id} className="entry" aria-current={sel?._id === f._id} onClick={() => setCurrent(f._id)}>
-            <div className="row">
-              <span className={`chip sev-${f.severity}`}>{f.severity}</span>
-              <span className={`chip st-${f.classification}`}>{CLASS_LABEL[f.classification] ?? f.classification}</span>
-              {f.status && f.status !== 'open' && <span className={`chip st-${f.status}`}>{STATUS_LABEL[f.status] ?? f.status}</span>}
-              {f.potentialRegression && f.status === 'open' && <span className="chip st-failed">potential regression</span>}
-            </div>
-            <div className="t">{f.title}</div>
-            <div className="small faint">{SOURCE_LABEL(f)} · last seen {timeAgo(f.lastSeenAt)}</div>
-          </button>
-        ))}
-      </div>
-      <div className="detail">
-        {sel && <FindingDetail f={detail?.finding ?? sel} records={detail?.records ?? []} index={index} ctx={ctx} />}
+        <div className="f-list-body">
+          {!ordered.length && <div className="f-empty">{needle ? 'No findings match this filter.' : status === 'open' ? 'No open findings. Nice.' : 'Nothing here yet.'}</div>}
+          {groups.map(([sev, list]) => (
+            <section key={sev} className="f-group">
+              <h4 className="f-group-head"><i className="sev-dot" style={{ background: SEVERITY_COLOR[sev] }} />{sev}<span className="n">{list.length}</span></h4>
+              {list.map((f) => (
+                <button key={f._id} className="f-row" aria-current={sel?._id === f._id} onClick={() => setCurrent(f._id)}>
+                  <span className="f-row-title">{f.title}</span>
+                  <span className="f-row-meta">
+                    {SOURCE_NAME[f.source] ?? f.source} · {timeAgo(f.lastSeenAt)}
+                    {f.status && f.status !== 'open' && <span className="f-state">{STATUS_LABEL[f.status] ?? f.status}</span>}
+                    {f.potentialRegression && f.status === 'open' && <span className="f-flag">regression</span>}
+                  </span>
+                </button>
+              ))}
+            </section>
+          ))}
+        </div>
+      </aside>
+      <div className="f-detail">
+        {sel && <FindingDetail key={sel._id} f={detail?.finding ?? sel} records={detail?.records ?? []} index={index} ctx={ctx} />}
       </div>
     </div>
   );
 }
 
+type DetailTab = 'summary' | 'evidence' | 'paths' | 'history';
+
+/** Merge duplicate file:line hits and group them per file. */
+function groupLocations(locs: { file: string; line: number }[]) {
+  const by = new Map<string, Set<number>>();
+  for (const l of locs) by.set(l.file, (by.get(l.file) ?? new Set()).add(l.line));
+  return [...by.entries()].map(([file, lines]) => ({ file, lines: [...lines].sort((a, b) => a - b) }));
+}
+
 function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[]; index: Index; ctx: Ctx }) {
+  const [tab, setTab] = useState<DetailTab>('summary');
+  const [allPaths, setAllPaths] = useState(false);
+  const [copied, setCopied] = useState(false);
   const changed = new Set(f.correlation?.changedNodes ?? []);
   const paths = f.correlation?.paths?.length ? f.correlation.paths : f.paths;
+  const locs = groupLocations(f.locations);
+  const openLoc = (l: { file: string; line: number }) => void api.post(`/api/projects/${ctx.projectId}/open-in-editor`, l);
+  const hasEvidence = (f.source === 'dependency' && !!f.pkg) || f.source === 'web' || GENERIC_SCAN_SOURCES.has(f.source) || (f.source === 'runtime' && f.evidence.failedAssertions?.length > 0);
+  const tabs: [DetailTab, string, number?][] = [
+    ['summary', 'Summary'],
+    ...(hasEvidence ? [['evidence', 'Evidence'] as [DetailTab, string]] : []),
+    ...(paths.length || locs.length ? [['paths', 'Code paths', paths.length || locs.length] as [DetailTab, string, number]] : []),
+    ['history', 'History', records.length],
+  ];
+  const active = tabs.some(([id]) => id === tab) ? tab : 'summary';
+  const pathsTitle = f.source === 'graph' ? 'Routes from an endpoint to the flagged code' : f.source === 'dependency' ? 'Endpoints whose code calls into this package' : SCAN_SOURCES.has(f.source) ? 'Code paths from the linked endpoint' : 'Paths from what the scenario exercised to the changed code';
+  const copyId = () => navigator.clipboard?.writeText(f._id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400); }).catch(() => {});
+
   return (
-    <>
-      <div className="section">
-        <div className="row"><span className={`chip sev-${f.severity}`}>{f.severity}</span><span className={`chip st-${f.classification}`}>{CLASS_LABEL[f.classification] ?? f.classification}</span><span className={`chip st-${f.status ?? 'open'}`}>{STATUS_LABEL[f.status ?? 'open'] ?? f.status}</span>{f.potentialRegression && <span className="chip st-failed">potential regression</span>}<span className="faint small mono">{f._id}</span></div>
-        <h2 style={{ marginTop: 8 }}>{f.title}</h2>
-        <p className="muted small">First seen {timeAgo(f.firstSeenAt)} · last seen {timeAgo(f.lastSeenAt)} · confidence {f.confidence}{f.confidenceNote ? ` (${f.confidenceNote})` : ''}</p>
-      </div>
-      {f.source === 'dependency' && f.pkg && <DependencyDetail f={f} ctx={ctx} />}
-      {f.source === 'web' && <WebDetail f={f} ctx={ctx} />}
-      {GENERIC_SCAN_SOURCES.has(f.source) && <ScanDetail f={f} ctx={ctx} />}
-      <div className="section">
-        <h3>What was found</h3>
-        <ul className="explain">{f.explanation.map((e, i) => <li key={i}>{e}</li>)}</ul>
-      </div>
-      {f.source === 'runtime' && f.evidence.failedAssertions?.length > 0 && (
-        <div className="section"><h3>Browser evidence</h3>
-          <div className="assert">{f.evidence.failedAssertions.map((a: any, i: number) => <span key={i} style={{ display: 'contents' }}><span className="mark-bad">✗</span><span><span className="mono">{a.step}</span><br /><span className="muted">{a.message}</span></span></span>)}</div>
-          {f.lastSeenBrowserRunId && <RunShots ctx={ctx} runId={f.lastSeenBrowserRunId} scenario={f.scenario} />}
+    <article className="f-card">
+      <header className="f-head">
+        <div className="f-badges">
+          <span className={`sev-badge sev-${f.severity}`}><i />{f.severity}</span>
+          {f.status && f.status !== 'open' && <span className={`chip st-${f.status}`}>{STATUS_LABEL[f.status] ?? f.status}</span>}
+          {f.potentialRegression && <span className="chip st-failed">potential regression</span>}
+          <span className="f-kind">{CLASS_LABEL[f.classification] ?? f.classification}</span>
         </div>
-      )}
-      {f.correlation && (
-        <div className="section">
-          <h3>Connection to code changes</h3>
-          <p><span className={`chip ${f.correlation.status === 'potentially_related' ? 'st-observed' : ''}`}>{f.correlation.status === 'potentially_related' ? 'potentially related' : 'no supporting path'}</span></p>
-          <p className="muted">{f.correlation.reason}</p>
+        <h1 className="f-title">{f.title}</h1>
+        <dl className="f-meta">
+          <div><dt>Source</dt><dd title={SOURCE_LABEL(f)}>{SOURCE_LABEL(f)}</dd></div>
+          <div><dt>First seen</dt><dd>{timeAgo(f.firstSeenAt)}</dd></div>
+          <div><dt>Last seen</dt><dd>{timeAgo(f.lastSeenAt)}</dd></div>
+          <div><dt>Confidence</dt><dd title={f.confidenceNote ?? undefined}>{f.confidence}</dd></div>
+        </dl>
+        <div className="f-actions">
+          {paths.length > 0 && <button className="btn primary small" onClick={() => ctx.select({ nodeId: paths[0][paths[0].length - 1], path: paths[0], from: 'finding' }, 'graph')}>Show in graph</button>}
+          {f.locations[0] && <button className="btn small" onClick={() => openLoc(f.locations[0])}>Open in editor</button>}
+          <button className="btn small ghost" onClick={copyId} title={f._id}>{copied ? <><Icon.check /> Copied</> : <><Icon.copy /> Copy ID</>}</button>
         </div>
-      )}
-      {paths.length > 0 && (
-        <div className="section">
-          <h3>{f.source === 'graph' ? 'Reachability paths' : f.source === 'dependency' ? 'Endpoints whose code calls into this package (existing code graph)' : SCAN_SOURCES.has(f.source) ? 'Code paths from the linked endpoint (existing code graph)' : 'Dependency paths from what the scenario exercised to the changed code'}</h3>
-          {paths.map((p, i) => <PathChain key={i} path={p} index={index} ctx={ctx} changed={changed} />)}
-          <button className="btn small" onClick={() => ctx.select({ nodeId: paths[0][paths[0].length - 1], path: paths[0], from: 'finding' }, 'graph')}>Show in graph</button>
-        </div>
-      )}
-      {f.locations.length > 0 && <div className="section"><h3>Source locations</h3><ul className="list">{f.locations.map((l, i) => (
-        <li key={i}><button onClick={() => api.post(`/api/projects/${ctx.projectId}/open-in-editor`, l)}><span className="lbl">{l.file}:{l.line}</span></button></li>
-      ))}</ul></div>}
-      <div className="section"><h3>Suggested next step</h3><p>{f.suggestedNextStep}</p></div>
-      <div className="section"><h3>Limitations</h3><ul className="explain limit">{f.limitations.map((l, i) => <li key={i}>{l}</li>)}</ul></div>
-      <div className="section">
-        <h3>Verification history</h3>
-        {records.length ? (
-          <table className="tbl"><tbody>{records.map((r) => (
-            <tr key={r._id}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(r.at).toLocaleString()}</td><td>{(f.source === 'web' ? WEB_ACTION_LABEL[r.action] : undefined) ?? ACTION_LABEL[r.action] ?? r.action}</td><td className="mono small muted">{r.browserRunId ?? r.securityRunId ?? r.analysisRunId}</td><td className="muted">{r.result}</td></tr>
-          ))}</tbody></table>
-        ) : <p className="muted small">No records yet.</p>}
+      </header>
+
+      <div className="f-tabs seg" role="tablist" aria-label="Finding details">
+        {tabs.map(([id, label, n]) => (
+          <button key={id} role="tab" aria-selected={active === id} onClick={() => setTab(id)}>{label}{n ? <span className="n">{n}</span> : null}</button>
+        ))}
       </div>
-    </>
+
+      <div className="f-body" role="tabpanel">
+        {active === 'summary' && (
+          <>
+            <section className="f-sec">
+              <h3>What was found</h3>
+              <ul className="f-points">{f.explanation.map((e, i) => <li key={i}>{e}</li>)}</ul>
+            </section>
+            <section className="f-callout"><h3>Suggested next step</h3><p>{f.suggestedNextStep}</p></section>
+            {f.correlation && (
+              <section className="f-sec">
+                <h3>Connection to code changes</h3>
+                <p><span className={`chip ${f.correlation.status === 'potentially_related' ? 'st-observed' : ''}`}>{f.correlation.status === 'potentially_related' ? 'potentially related' : 'no supporting path'}</span></p>
+                <p className="muted">{f.correlation.reason}</p>
+              </section>
+            )}
+            {f.limitations.length > 0 && (
+              <details className="f-disclose">
+                <summary>Limitations of this result ({f.limitations.length})</summary>
+                <ul className="f-points">{f.limitations.map((l, i) => <li key={i} className="muted">{l}</li>)}</ul>
+              </details>
+            )}
+          </>
+        )}
+
+        {active === 'evidence' && (
+          <>
+            {f.source === 'dependency' && f.pkg && <DependencyDetail f={f} ctx={ctx} />}
+            {f.source === 'web' && <WebDetail f={f} ctx={ctx} />}
+            {GENERIC_SCAN_SOURCES.has(f.source) && <ScanDetail f={f} ctx={ctx} />}
+            {f.source === 'runtime' && f.evidence.failedAssertions?.length > 0 && (
+              <section className="f-sec"><h3>Browser evidence</h3>
+                <div className="assert">{f.evidence.failedAssertions.map((a: any, i: number) => <span key={i} style={{ display: 'contents' }}><span className="mark-bad">✗</span><span><span className="mono">{a.step}</span><br /><span className="muted">{a.message}</span></span></span>)}</div>
+                {f.lastSeenBrowserRunId && <RunShots ctx={ctx} runId={f.lastSeenBrowserRunId} scenario={f.scenario} />}
+              </section>
+            )}
+          </>
+        )}
+
+        {active === 'paths' && (
+          <>
+            {paths.length > 0 && (
+              <section className="f-sec">
+                <h3>{pathsTitle} ({paths.length})</h3>
+                <p className="f-hint">One row per route. Select a step to inspect it in the code graph.</p>
+                <div className="f-paths">
+                  {(allPaths ? paths : paths.slice(0, 3)).map((p, i) => <div className="f-path" key={i}><PathChain path={p} index={index} ctx={ctx} changed={changed} /></div>)}
+                </div>
+                {paths.length > 3 && <button className="btn small ghost" style={{ marginTop: 8 }} onClick={() => setAllPaths((v) => !v)}>{allPaths ? 'Show fewer' : `Show ${paths.length - 3} more`}</button>}
+              </section>
+            )}
+            {locs.length > 0 && (
+              <section className="f-sec">
+                <h3>Source locations</h3>
+                <ul className="f-locs">
+                  {locs.map(({ file, lines }) => (
+                    <li key={file}>
+                      <span className="f-file">{file}</span>
+                      <span className="f-lines">{lines.map((line) => <button key={line} className="f-line" onClick={() => openLoc({ file, line })} title={`Open ${file}:${line} in the editor`}>:{line}</button>)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
+        )}
+
+        {active === 'history' && (
+          <section className="f-sec">
+            <h3>Verification history</h3>
+            {records.length ? (
+              <table className="tbl"><tbody>{records.map((r) => (
+                <tr key={r._id} title={r.browserRunId ?? r.securityRunId ?? r.analysisRunId}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(r.at).toLocaleString()}</td><td>{(f.source === 'web' ? WEB_ACTION_LABEL[r.action] : undefined) ?? ACTION_LABEL[r.action] ?? r.action}</td><td className="muted">{r.result}</td></tr>
+              ))}</tbody></table>
+            ) : <p className="muted small">No records yet.</p>}
+          </section>
+        )}
+      </div>
+    </article>
   );
 }
 

@@ -1,7 +1,7 @@
 import type { Graph, GraphEdge, GraphNode, NodeKind } from './api';
 
 export const KIND_COLOR: Record<NodeKind, string> = {
-  endpoint: '#5b9bf0', function: '#5ec38b', sink: '#ef5f6b', database: '#e0b04a', test: '#a48bf6', external: '#46c2c7', module: '#6b7585',
+  endpoint: '#0a84ff', function: '#30d158', sink: '#ff453a', database: '#ffd60a', test: '#bf5af2', external: '#64d2ff', module: '#8e8e93',
 };
 export const KIND_LABEL: Record<NodeKind, string> = {
   endpoint: 'API endpoint', function: 'Function', sink: 'Sensitive sink', database: 'Database operation', test: 'Test', external: 'External service', module: 'Module',
