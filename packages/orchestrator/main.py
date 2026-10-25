@@ -110,8 +110,12 @@ def investigate(project_id: str, endpoint: dict, available: list[str], run_deps:
             # findings (a clean scan is already reported via the harness.log_event path below).
             key = f"{f['tool']}|{f['evidence'].get('advisoryId')}"
             saved = {**f, "endpoint": f["evidence"].get("advisoryId")}
+            scan_run_id = f["evidence"].get("runId")
+            # An empty-string id fails the server's evidence validator outright (rejected, not
+            # stored) — omit evidence entirely rather than pass one, letting remember() fall back
+            # to its own default (the agent run's own id, which always exists).
             agent_memory.remember(project_id, run["_id"], "package", key, "finding", saved["summary"],
-                                  evidence=[{"kind": "scan_run", "id": f["evidence"].get("runId") or ""}])
+                                  evidence=[{"kind": "scan_run", "id": scan_run_id}] if scan_run_id else None)
             new += 1
             print(f"[{saved['tool']}] FINDING: {saved['summary']} (severity={saved.get('severity')})")
             harness.log_event(project_id, "tool_result", f"{saved['tool']}: {saved['summary']}",

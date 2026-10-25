@@ -224,8 +224,10 @@ const MEMORY_SCHEMA = {
 };
 
 /** Build one index without ever taking down the whole Store: a bad index on one collection (e.g. stray
- *  documents left over from a previous use of the collection name) is logged, not fatal. */
-async function safeIndex(db: Db, name: string, spec: Document, options?: Document) {
+ *  documents left over from a previous use of the collection name) is logged, not fatal.
+ *  Exported for reuse by Store.ensureIndexes() in ../store/mongo.ts, which needs the same guard
+ *  for every collection it indexes, not just the agent-memory ones. */
+export async function safeIndex(db: Db, name: string, spec: Document, options?: Document) {
   try {
     await db.collection(name).createIndex(spec, options);
   } catch (e) {

@@ -188,36 +188,6 @@ export class Service {
     app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));
 
     app.post('/api/projects/:id/security/dependency-scans', h(async (req, res) => {
-      const r = await this.session(req).deps.start('manual');
-      res.status(202);
-      return r;
-    }));
-
-    app.post('/api/projects/:id/security/dependency-scans/cancel', h((req) => ({ cancelled: this.session(req).deps.cancel() })));
-
-    app.get('/api/projects/:id/security/dependency-scans', h(async (req) => {
-      const s = this.session(req);
-      return this.store.col('security_scan_runs').find({ projectId: s.id, category: 'dependency_vulns' }, { projection: { readiness: 0 } }).sort({ startedAt: -1 }).limit(30).toArray();
-    }));
-
-    app.get('/api/projects/:id/security/dependency-scans/:rid', h(async (req) => {
-      const s = this.session(req);
-      const run = await this.store.col('security_scan_runs').findOne({ _id: req.params.rid as never, projectId: s.id });
-      const observations = await this.store.col('security_observations').find({ runId: req.params.rid, projectId: s.id }).limit(2000).toArray();
-      return { run, observations };
-    }));
-
-    app.get('/api/projects/:id/security/summary', h(async (req) => this.store.dependencySummary(this.session(req).id)));
-
-    app.get('/api/projects/:id/findings/:fid/observations', h(async (req) => {
-      const s = this.session(req);
-      return this.store.col('security_observations').find({ projectId: s.id, findingId: req.params.fid }).sort({ observedAt: -1 }).limit(200).toArray();
-    }));
-
-    // ---- dependency vulnerability scanning (external tools; never downloaded or installed by the service) ----
-    app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));
-
-    app.post('/api/projects/:id/security/dependency-scans', h(async (req, res) => {
       const { tools, trigger } = z.object({
         tools: z.array(z.enum(['osv-api', 'npm-audit', 'osv-scanner', 'trivy'])).min(1).optional(),
         trigger: z.enum(['manual', 'agent']).default('manual'),
