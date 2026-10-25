@@ -27,10 +27,14 @@ const STYLE: any[] = [
   { selector: 'node[kind="test"]', style: { shape: 'tag', width: 16, height: 14, color: '#c9baf9' } },
   { selector: 'node[kind="external"]', style: { shape: 'hexagon' } },
   { selector: 'node[kind="module"]', style: { shape: 'rectangle', width: 12, height: 12, color: '#8a95a6' } },
+  { selector: 'node[findingSeverity="high"]', style: { 'underlay-color': '#ef5f6b', 'underlay-opacity': 0.72, 'underlay-padding': 7 } },
+  { selector: 'node[findingSeverity="medium"]', style: { 'underlay-color': '#e0b04a', 'underlay-opacity': 0.72, 'underlay-padding': 7 } },
+  { selector: 'node[findingSeverity="low"], node[findingSeverity="info"], node[findingSeverity="unknown"]', style: { 'underlay-color': '#8a95a6', 'underlay-opacity': 0.7, 'underlay-padding': 6 } },
   { selector: 'node.unsaved', style: { 'border-width': 2, 'border-style': 'dashed', 'border-color': '#d8dee7' } },
   { selector: 'node.impacted', style: { 'border-width': 2, 'border-color': '#ff9a3c', 'border-opacity': 0.55 } },
   { selector: 'node.changed', style: { 'border-width': 3, 'border-color': '#ff9a3c', 'border-opacity': 1 } },
   { selector: 'node.sel', style: { 'border-width': 3, 'border-color': '#ffffff', 'font-weight': 'bold', color: '#ffffff' } as any },
+  { selector: 'node.sel', style: { 'underlay-opacity': 0 } },
   { selector: 'edge', style: {
     width: 1.2, 'line-color': '#3d4756', 'target-arrow-color': '#3d4756', 'target-arrow-shape': 'triangle', 'arrow-scale': 0.7,
     'curve-style': 'bezier', opacity: 0.9,
@@ -55,6 +59,8 @@ export function GraphView({ ctx }: { ctx: Ctx }) {
   const [depth, setDepth] = useState(8);
   const [hideUnrelated, setHideUnrelated] = useState(false);
   const [highlight, setHighlight] = useState<Highlight>('last');
+  const [findings, setFindings] = useState<Finding[]>([]);
+  const [findingsError, setFindingsError] = useState<string | null>(null);
   const pickedDefault = useRef(false);
   useEffect(() => {
     if (pickedDefault.current || !ctx.graph?.graph) return;
@@ -70,6 +76,46 @@ export function GraphView({ ctx }: { ctx: Ctx }) {
   const lastPulsed = useRef(0);
 
   const selected = ctx.selection.nodeId && index ? index.nodes.get(ctx.selection.nodeId) ?? null : null;
+
+  useEffect(() => {
+    api.get<Finding[]>(`/api/projects/${ctx.projectId}/findings?status=open`)
+      .then((items) => { setFindings(items); setFindingsError(null); })
+      .catch((e) => setFindingsError((e as Error).message));
+  }, [ctx.projectId, ctx.ticks.findings]);
+
+  const findingsByNode = useMemo(() => {
+    const severityRank: Record<Finding['severity'], number> = { high: 5, medium: 4, low: 3, info: 2, unknown: 1 };
+    const result = new Map<string, { count: number; severity: Finding['severity'] }>();
+    const graphNodes = g?.nodes ?? [];
+    const graphNodeIds = new Set(graphNodes.map((node) => node.id));
+    const add = (id: string, severity: Finding['severity']) => {
+      const current = result.get(id);
+      if (!current) result.set(id, { count: 1, severity });
+      else result.set(id, {
+        count: current.count + 1,
+        severity: severityRank[severity] > severityRank[current.severity] ? severity : current.severity,
+      });
+    };
+    for (const finding of findings) {
+      const linkedNodes = new Set(finding.nodes.filter((id) => graphNodeIds.has(id)));
+      for (const location of finding.locations) {
+        const matches = graphNodes.filter((node) =>
+          node.loc?.file === location.file && node.kind !== 'module' &&
+          node.loc.line <= location.line && (node.loc.endLine ?? node.loc.line) >= location.line);
+        if (matches.length) {
+          const mostSpecific = Math.min(...matches.map((node) => (node.loc!.endLine ?? node.loc!.line) - node.loc!.line));
+          for (const node of matches) {
+            if ((node.loc!.endLine ?? node.loc!.line) - node.loc!.line === mostSpecific) linkedNodes.add(node.id);
+          }
+        } else {
+          const module = graphNodes.find((node) => node.kind === 'module' && node.loc?.file === location.file);
+          if (module) linkedNodes.add(module.id);
+        }
+      }
+      for (const id of linkedNodes) add(id, finding.severity);
+    }
+    return result;
+  }, [findings, g]);
 
   // Change sets for highlighting.
   const changeSet = useMemo(() => {
@@ -117,7 +163,13 @@ export function GraphView({ ctx }: { ctx: Ctx }) {
     if (!cy || !g || !visible) return;
     const showImports = kinds.has('module');
     const els: cytoscape.ElementDefinition[] = [];
-    for (const n of g.nodes) if (visible.has(n.id)) els.push({ group: 'nodes', data: { id: n.id, label: nodeName(n, n.label), kind: n.kind, color: KIND_COLOR[n.kind] } });
+    for (const n of g.nodes) if (visible.has(n.id)) {
+      const finding = findingsByNode.get(n.id);
+      els.push({ group: 'nodes', data: {
+        id: n.id, label: `${nodeName(n, n.label)}${finding ? ` [${finding.count}]` : ''}`, kind: n.kind, color: KIND_COLOR[n.kind],
+        findingCount: finding?.count ?? 0, findingSeverity: finding?.severity ?? '',
+      } });
+    }
     for (const e of g.edges) {
       if (!visible.has(e.source) || !visible.has(e.target)) continue;
       if (e.kind === 'imports' && !showImports) continue;
@@ -132,7 +184,7 @@ export function GraphView({ ctx }: { ctx: Ctx }) {
     layoutKey.current = key;
     cy.batch(() => { cy.elements().remove(); cy.add(els); });
     cy.layout({ name: 'dagre', rankDir: 'LR', rankSep: 150, nodeSep: 34, edgeSep: 10, ranker: 'network-simplex', animate: false, fit: true, padding: 40 } as any).run();
-  }, [g, visible, kinds]);
+  }, [g, visible, kinds, findingsByNode]);
 
   // Apply highlight classes.
   useEffect(() => {
@@ -248,6 +300,17 @@ export function GraphView({ ctx }: { ctx: Ctx }) {
           {(changeSet.changed.size > 0) && <p className="small muted" style={{ margin: '4px 0 0' }}><span style={{ color: 'var(--changed)' }}>{changeSet.changed.size} changed</span>, {changeSet.impacted.size} depend on them</p>}
         </fieldset>
         <fieldset>
+          <legend>Findings</legend>
+          <span className="small muted">Open findings show a count in the node label and a halo for the highest severity.</span>
+          <p className="small" style={{ margin: '6px 0 0' }}>
+            <span className="chip sev-high">high</span>{' '}
+            <span className="chip sev-medium">medium</span>{' '}
+            <span className="chip sev-low">low, info, unknown</span>
+          </p>
+          {findingsError && <p className="small st-failed" role="status">Could not load graph findings: {findingsError}</p>}
+          {!findingsError && <p className="small muted" style={{ margin: '4px 0 0' }}>{findingsByNode.size} linked graph nodes</p>}
+        </fieldset>
+        <fieldset>
           <legend>When a node is selected</legend>
           {(['both', 'upstream', 'downstream', 'neighbours'] as Focus[]).map((f) => (
             <label key={f}><input type="radio" name="focus" checked={focus === f} onChange={() => setFocus(f)} />
@@ -340,8 +403,14 @@ export function PathChain({ path, index, ctx, changed }: { path: string[]; index
 function NodeDetails({ node, index, ctx, changeSet }: { node: GraphNode; index: Index; ctx: Ctx; changeSet: { changed: Set<string>; impacted: Set<string> } }) {
   const [findings, setFindings] = useState<Finding[]>([]);
   useEffect(() => {
-    api.get<Finding[]>(`/api/projects/${ctx.projectId}/findings?status=open`).then((f) => setFindings(f.filter((x) => x.nodes.includes(node.id)))).catch(() => setFindings([]));
-  }, [node.id, ctx.projectId, ctx.ticks.findings]);
+    api.get<Finding[]>(`/api/projects/${ctx.projectId}/findings?status=open`).then((items) => setFindings(items.filter((finding) =>
+      finding.nodes.includes(node.id) || (!!node.loc && finding.locations.some((location) => {
+        if (location.file !== node.loc!.file) return false;
+        if (node.kind === 'module') return true;
+        return location.line >= node.loc!.line && location.line <= (node.loc!.endLine ?? node.loc!.line);
+      })),
+    ))).catch(() => setFindings([]));
+  }, [node.id, node.kind, node.loc?.file, node.loc?.line, node.loc?.endLine, ctx.projectId, ctx.ticks.findings]);
   const incoming = index.in.get(node.id) ?? [];
   const outgoing = index.out.get(node.id) ?? [];
   const up = index.walk([node.id], 'up');
@@ -379,7 +448,25 @@ function NodeDetails({ node, index, ctx, changeSet }: { node: GraphNode; index: 
 
       {node.loc && <SourceSnippet projectId={ctx.projectId} file={node.loc.file} line={node.loc.line} tick={ctx.graph?.graphVersion ?? 0} />}
 
-      {findings.length > 0 && <><h3>Findings on this node</h3>{findings.map((f) => <p key={f._id} className="small"><span className={`chip sev-${f.severity}`}>{f.severity}</span> {f.title}</p>)}</>}
+      {findings.length > 0 && <section className="section" aria-label="Finding explanations">
+        <h3>Findings on this node</h3>
+        {findings.map((finding) => (
+          <article key={finding._id} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+            <div className="row">
+              <span className={`chip sev-${finding.severity}`}>{finding.severity}</span>
+              <b className="small">{finding.title}</b>
+            </div>
+            <p className="small" style={{ margin: '6px 0' }}>
+              <b>How serious:</b> {severityExplanation(finding.severity)}
+            </p>
+            {finding.explanation.slice(0, 2).map((item, i) => <p key={i} className="small muted" style={{ margin: '4px 0' }}>{item}</p>)}
+            <p className="small muted" style={{ margin: '4px 0' }}>
+              Confidence: {finding.confidence}{finding.confidenceNote ? ` — ${finding.confidenceNote}` : ''}
+            </p>
+            {finding.suggestedNextStep && <p className="small" style={{ margin: '4px 0' }}><b>Next:</b> {finding.suggestedNextStep}</p>}
+          </article>
+        ))}
+      </section>}
 
       <h3>Depends on it ({incoming.length})</h3>
       {incoming.length ? <ul className="list">{incoming.map((e) => <NodeLink key={e.id} id={e.source} index={index} ctx={ctx} note={`${EDGE_LABEL[e.kind] ?? e.kind}${e.certainty === 'inferred' ? ', inferred' : ''}`} />)}</ul> : <p className="small muted">Nothing in the analysed code calls this.</p>}
@@ -392,6 +479,16 @@ function NodeDetails({ node, index, ctx, changeSet }: { node: GraphNode; index: 
       {pick(down, 'sink').length > 0 && <><h3>Sensitive sinks it reaches</h3><ul className="list">{pick(down, 'sink').map((id) => <NodeLink key={id} id={id} index={index} ctx={ctx} />)}</ul></>}
     </div>
   );
+}
+
+function severityExplanation(severity: Finding['severity']): string {
+  switch (severity) {
+    case 'high': return 'potentially serious; prioritize review. Severity is not proof that the issue is exploitable.';
+    case 'medium': return 'worth investigating; practical impact may depend on configuration and exposure.';
+    case 'low': return 'lower reported impact; review the evidence and context.';
+    case 'info': return 'informational; this may be context rather than a confirmed vulnerability.';
+    case 'unknown': return 'the scanner did not provide a severity, so impact is not ranked.';
+  }
 }
 
 function EdgeDetails({ edge, index, ctx }: { edge: GraphEdge; index: Index; ctx: Ctx }) {

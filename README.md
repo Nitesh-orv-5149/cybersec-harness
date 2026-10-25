@@ -6,7 +6,7 @@ No Git integration, no commits required, no remote LLM.
 
 ```
 editor events ──► VS Code extension ──┐
-filesystem events ──► chokidar ───────┼─► local service (Node/TS, 127.0.0.1:4317)
+filesystem events ──► chokidar ───────┼─► local service (Node/TS, 127.0.0.1:4318)
                                       │      ├─ analyzer: TypeScript compiler API → per-file facts → linker → graph
                                       │      ├─ debounce/coalesce queue → incremental re-parse → graph diff → impact
                                       │      ├─ snapshots (content-addressed copies, outside your working tree)
@@ -31,7 +31,7 @@ npx playwright install chromium
 (cd sample-app && npm install)
 npm run build
 npm start -- --project ./sample-app
-# open http://127.0.0.1:4317
+# open http://127.0.0.1:4318
 ```
 
 Options: `--port`, `--mongo <uri>`, `--db <name>`, `--no-monitor`, repeat `--project` for several folders. Env: `WORKBENCH_MONGO_URI`, `WORKBENCH_DATA_DIR` (snapshots/screenshots, default `~/.local/share/workbench`), `WORKBENCH_LOG_LEVEL`.
@@ -53,15 +53,19 @@ Commands: *Start monitoring this workspace*, *Open dashboard*, *Mark current fil
 
 ### LLM orchestrator (the AI agent)
 
-`packages/orchestrator` is a small Python agent that watches the harness's live graph over the WebSocket and, when a code change touches an endpoint, decides which security tools to run against it. It does not run scanners itself: it asks the harness to run the **real** dependency scanners (npm audit, OSV-Scanner, OSV.dev API, Trivy) so results land in the same MongoDB and dashboard as everything else. It also runs three lightweight endpoint probes (`auth_probe`, `sqli_probe`, `secret_scan`) directly against the running app. Every step — the change it noticed, the tools it chose (and whether the model or the fallback chose them), and each result — is reported to the harness and shown live in the dashboard's **AI agent** tab.
+`packages/orchestrator` is a small Python agent that watches the harness's live graph over the WebSocket. For every new graph revision, it checks newly added, changed, or affected endpoints and asks the configured model which endpoint probes to run. It independently asks the harness to run every currently-ready dependency scanner (npm audit, OSV-Scanner, OSV.dev API, Trivy), even when no endpoint was affected. If several graph updates arrive while a scan is running, it coalesces them into one scan of the latest project state. It also runs three lightweight endpoint probes (`auth_probe`, `sqli_probe`, `secret_scan`) directly against the running app. Every step is reported to the harness and shown live in the dashboard's **AI agent** tab. The Security tab keeps its manual **Run dependency scan** button as well.
 
 ```sh
 # 1. the harness and the app it monitors must be running first
 node --env-file=.env packages/service/dist/cli.js --project ./sample-app   # terminal 1
 (cd sample-app && node src/server.js)                                      # terminal 2 (the app under test, on :3000)
 
-# 2. (optional) a local model for the tool-choice step — without it the agent safely falls back to running every available tool
-#    install Ollama, then:  ollama pull qwen3:4b-instruct-2507-q8_0
+# 2. (optional) configure a model for the tool-choice step.
+#    OpenAI: put a newly rotated key in your local .env as OPENAI_API_KEY=... and load it in this shell:
+#      set -a; source .env; set +a
+#    OPENAI_MODEL is optional (defaults to gpt-4o-mini). The model receives only endpoint method/path
+#    and the currently-available tool names. If no OpenAI key is set, the agent tries local Ollama:
+#      ollama pull qwen3:4b-instruct-2507-q8_0
 
 # 3. the agent
 python3 -m venv packages/orchestrator/.venv
@@ -69,9 +73,9 @@ packages/orchestrator/.venv/bin/pip install -r packages/orchestrator/requirement
 packages/orchestrator/.venv/bin/python packages/orchestrator/main.py                 # terminal 3
 ```
 
-Now edit a watched route (e.g. append a line to `sample-app/src/routes/orders.js`): within ~1s the harness re-analyses, the agent wakes, picks tools, runs them, and the **AI agent** dashboard tab fills with its decisions and findings. The agent only offers the model scanners the harness currently reports as *ready* (installed and reachable), so it can never pick a tool that isn't usable. Dependency scans are project-wide, so the agent runs them once per change batch rather than once per endpoint.
+Now edit a watched route (e.g. append a line to `sample-app/src/routes/orders.js`): the harness re-analyses, the agent checks the changed/affected endpoints and runs available dependency scanners, and the **AI agent** dashboard tab records its decisions and results. The agent only invokes dependency scanners the harness currently reports as *ready* (installed and reachable). The automatic scanner requires the orchestrator process to be running; the manual button in the Security tab is still available independently.
 
-Config: the harness and app URLs and the Ollama model live at the top of `packages/orchestrator/harness.py` and `llm.py`. The agent's own copy of findings is a flat `packages/orchestrator/memory.json` (a stand-in for a Mongo collection); the authoritative scan runs are persisted by the harness.
+Config: the harness and app URLs live at the top of `packages/orchestrator/harness.py`. The agent uses OpenAI when `OPENAI_API_KEY` is set (model configurable with `OPENAI_MODEL`); otherwise it tries the local Ollama model configured in `packages/orchestrator/llm.py`. Without a reachable model, it safely falls back to running every available tool. The agent's own copy of findings is a flat `packages/orchestrator/memory.json` (a stand-in for a Mongo collection); the authoritative scan runs are persisted by the harness.
 
 ## macOS setup (step by step)
 
@@ -90,7 +94,7 @@ npx playwright install chromium                 # browser for Website comparison
 npm run build                                   # dashboard, service and extension
 cp .env.example .env                            # optional; only needed for a non-default MongoDB
 node --env-file=.env packages/service/dist/cli.js --project ./sample-app    # or without --env-file for defaults
-# open http://127.0.0.1:4317
+# open http://127.0.0.1:4318
 ```
 
 **Scanners (all optional; the workbench never installs or updates them).** A missing tool shows as `not installed` and its runs are stored as `unavailable` with no counts, never as a clean result.
@@ -119,7 +123,7 @@ node --env-file=.env packages/service/dist/cli.js --project ./sample-app    # or
 - *MongoDB unavailable*: `brew services list`; the graph still updates, but scans and history need MongoDB.
 - *A browser scenario was skipped*: the banner names the unsupported step; the rest of `workbench.config.json` still applies.
 - *Managed target did not start*: the run shows the app log. Check `run.start`, `run.healthPath`, `run.startTimeoutMs`, and that `snapshot.exclude` does not drop files the app needs (for example a built `dist` folder; see the Juice Shop example).
-- *Port 4317 in use*: `WORKBENCH_PORT=4318 node packages/service/dist/cli.js --project ...`.
+- *Port 4318 in use*: `WORKBENCH_PORT=4319 node packages/service/dist/cli.js --project ...`.
 ## Demo walkthrough (sample app)
 
 The sample app is a labelled fixture: an Express orders API with a static frontend, three node:test tests, and deliberately unsafe endpoints.
@@ -442,5 +446,5 @@ cd packages/service && WORKBENCH_REAL_SCANNERS=1 npx vitest run test/security-de
 - Nuclei: template vetting reads the YAML line by line (no YAML parser); anything it cannot classify is rejected, so some harmless templates may be excluded. URL-mode graph links use the current working-tree graph, which may differ from the code the running app was started from. The nuclei adapter's parsing is tested against synthetic output written from the nuclei source's `ResultEvent` struct until it has been run against a real binary (see `test/fixtures/web/README.md`).
 - Not integrated yet: OWASP ZAP, Syft/Grype (SBOM and SBOM-based vulnerability scanning), Semgrep and CodeQL. Their ids exist only as dashboard labels.
 - Gitleaks and Checkov have been verified on Linux with Gitleaks 8.24.3 and Checkov 3.3.30; other versions are accepted (Gitleaks 8.19+, Checkov 3.x) but have not been run.
-- The AI agent (`packages/orchestrator`) probes `http://127.0.0.1:3000` directly (`auth_probe`, `sqli_probe`): it does not use the managed-target authorisation flow of API testing, so only run it against your own local app. It sends the model only an endpoint's method and path, to a local Ollama.
+- The AI agent (`packages/orchestrator`) probes `http://127.0.0.1:3000` directly (`auth_probe`, `sqli_probe`): it does not use the managed-target authorisation flow of API testing, so only run it against your own local app. It sends the model only the endpoint's method and path and available tool names; this is sent to OpenAI if `OPENAI_API_KEY` is set, otherwise it tries local Ollama.
 - The extension is a thin client and has been compiled but should be smoke-tested in your VS Code.

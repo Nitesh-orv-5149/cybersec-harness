@@ -55,7 +55,7 @@ export function SecurityView({ ctx }: { ctx: Ctx }) {
           : <button className="btn primary" disabled={busy || !storeUp || !dep?.enabled} onClick={start} title={!storeUp ? 'MongoDB is required to store scan results' : undefined}>Run dependency scan</button>}
         <button className="btn small" disabled={checking} onClick={() => loadScanners(true)}>{checking ? 'Checking…' : 'Re-check scanners'}</button>
         <span className="small muted">Mode <b>{dep?.mode}</b> · order {dep?.order?.map((t: string) => TOOL_LABEL[t] ?? t).join(' → ')} · network {dep?.allowNetwork ? <b>allowed</b> : <b>not allowed</b>}</span>
-        <span className="small faint">Manual only. Tools are never downloaded or installed by the workbench.</span>
+        <span className="small faint">Manual scans remain available. With the AI orchestrator running, ready dependency scanners also run automatically after each graph change; tools are never downloaded or installed by the workbench.</span>
       </div>
       <div style={{ padding: '16px 20px' }}>
         {err && <div className="banner" style={{ marginBottom: 12 }}>{err}</div>}

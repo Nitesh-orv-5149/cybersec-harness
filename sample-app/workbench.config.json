@@ -86,6 +86,9 @@
     "debounceMs": 400
   },
   "security": {
+    "api": {
+      "allowActiveTesting": true
+    },
     "allowNetwork": true,
     "dependencies": { "mode": "all-available", "order": ["osv-api", "npm-audit", "osv-scanner", "trivy"] }
   }

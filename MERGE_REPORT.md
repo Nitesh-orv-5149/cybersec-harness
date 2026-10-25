@@ -114,7 +114,7 @@ Baselines before merging, run the same way:
 unzip security-workbench-merged.zip && cd security-workbench-merged
 brew services start mongodb-community        # or any MongoDB 6+; see README "macOS setup"
 npm install && npm run build
-node packages/service/dist/cli.js --project ./sample-app     # http://127.0.0.1:4317
+node packages/service/dist/cli.js --project ./sample-app     # http://127.0.0.1:4318
 npm test                                      # service + dashboard tests (MongoDB tests skip if it is down)
 ```
 Scanner installation, safe-scan rules and troubleshooting: README, section "macOS setup".

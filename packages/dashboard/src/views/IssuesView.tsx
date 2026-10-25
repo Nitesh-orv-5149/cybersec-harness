@@ -93,6 +93,9 @@ export function IssuesView({ ctx }: { ctx: Ctx }) {
 function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[]; index: Index; ctx: Ctx }) {
   const changed = new Set(f.correlation?.changedNodes ?? []);
   const paths = f.correlation?.paths?.length ? f.correlation.paths : f.paths;
+  const graphPath = paths.find((p) => p.every((id) => index.nodes.has(id)));
+  const graphNodes = f.nodes.filter((id) => index.nodes.has(id));
+  const graphSelection = graphPath ?? graphNodes;
   return (
     <>
       <div className="section">
@@ -124,7 +127,17 @@ function FindingDetail({ f, records, index, ctx }: { f: Finding; records: any[];
         <div className="section">
           <h3>{f.source === 'graph' ? 'Reachability paths' : f.source === 'dependency' ? 'Endpoints whose code calls into this package (existing code graph)' : SCAN_SOURCES.has(f.source) ? 'Code paths from the linked endpoint (existing code graph)' : 'Dependency paths from what the scenario exercised to the changed code'}</h3>
           {paths.map((p, i) => <PathChain key={i} path={p} index={index} ctx={ctx} changed={changed} />)}
-          <button className="btn small" onClick={() => ctx.select({ nodeId: paths[0][paths[0].length - 1], path: paths[0], from: 'finding' }, 'graph')}>Show in graph</button>
+          {graphSelection.length > 0 && <button className="btn small" onClick={() => ctx.select({ nodeId: graphSelection[graphSelection.length - 1]!, path: graphPath ?? null, from: 'finding' }, 'graph')}>Show in graph</button>}
+        </div>
+      )}
+      {paths.length === 0 && graphNodes.length > 0 && (
+        <div className="section">
+          <h3>Linked graph nodes</h3>
+          <p className="small muted">These nodes are marked with this finding’s severity in the code graph.</p>
+          <ul className="list">{graphNodes.map((id) => {
+            const node = index.nodes.get(id);
+            return <li key={id}><button onClick={() => ctx.select({ nodeId: id, path: null, from: 'finding' }, 'graph')}><span className="lbl">{node?.label ?? id}</span></button></li>;
+          })}</ul>
         </div>
       )}
       {f.locations.length > 0 && <div className="section"><h3>Source locations</h3><ul className="list">{f.locations.map((l, i) => (

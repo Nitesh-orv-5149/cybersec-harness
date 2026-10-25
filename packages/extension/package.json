@@ -48,7 +48,7 @@
       "properties": {
         "workbench.serviceUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:4317",
+          "default": "http://127.0.0.1:4318",
           "description": "Local analysis service URL (loopback only)."
         },
         "workbench.sendUnsavedBuffers": {

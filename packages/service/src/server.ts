@@ -1,6 +1,4 @@
 // Local HTTP + WebSocket API. Binds to loopback only and rejects cross-site requests.
-import { sha256 } from './util.js';
-import { validateFindingReview, validateRequirementInput, validateVerificationInput } from './store/schemas.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -15,7 +13,6 @@ import { graphFindings } from './findings.js';
 import { browserAvailable } from './browser.js';
 import { newId } from './util.js';
 import { log } from './log.js';
-import { registerAgentRoutes } from './agentMemory.js';
 
 export class Service {
   readonly store: Store;
@@ -142,47 +139,6 @@ export class Service {
       const records = await this.store.col('verification_records').find({ projectId: s.id, findingId: req.params.fid }).sort({ at: -1 }).limit(50).toArray();
       return { finding, records };
     }));
-        const bad = (errors: string[]) => Object.assign(new Error(errors.join('; ')), { status: 400 });
-
-    app.get('/api/projects/:id/requirements', h(async (req) => {
-      const s = this.session(req);
-      return this.store.col('agent_requirements').find({ projectId: s.id }).sort({ priority: 1, updatedAt: -1 }).limit(200).toArray();
-    }));
-
-    app.post('/api/projects/:id/requirements', h(async (req) => {
-      const s = this.session(req);
-      const v = validateRequirementInput({ ...req.body, projectId: s.id });
-      if (!v.ok) throw bad(v.errors);
-      const id = `req_${sha256(`${s.id}|${v.value.title}`).slice(0, 20)}`;
-      const now = new Date();
-      await this.store.col('agent_requirements').updateOne(
-        { _id: id as never },
-        { $set: { ...v.value, updatedAt: now }, $inc: { version: 1 }, $setOnInsert: { createdAt: now } },
-        { upsert: true },
-      );
-      return this.store.col('agent_requirements').findOne({ _id: id as never });
-    }));
-
-    app.post('/api/projects/:id/findings/:fid/review', h(async (req) => {
-      const s = this.session(req);
-      const body = { ...req.body, reviewedAt: req.body?.reviewedAt ? new Date(req.body.reviewedAt) : req.body?.reviewed ? new Date() : null };
-      const v = validateFindingReview(body);
-      if (!v.ok) throw bad(v.errors);
-      const r = await this.store.col('graph_findings').updateOne({ _id: req.params.fid as never, projectId: s.id }, { $set: { review: v.value } });
-      if (!r.matchedCount) throw Object.assign(new Error('unknown finding'), { status: 404 });
-      return { ok: true, review: v.value };
-    }));
-
-    app.post('/api/projects/:id/verification', h(async (req) => {
-      const s = this.session(req);
-      const v = validateVerificationInput({ ...req.body, projectId: s.id });
-      if (!v.ok) throw bad(v.errors);
-      const doc = { _id: `ver_${sha256(`${Date.now()}|${v.value.findingId}|${v.value.action}`).slice(0, 20)}`, ...v.value, at: new Date() };
-      await this.store.col('verification_records').insertOne(doc as never);
-      return doc;
-    }));
-
-    registerAgentRoutes(app, h, this.store, (req) => this.session(req).id);
 
     // ---- dependency vulnerability scanning (external tools; never downloaded or installed by the service) ----
     app.get('/api/projects/:id/security/scanners', h(async (req) => this.session(req).deps.scanners(req.query.refresh === '1')));
@@ -261,7 +217,7 @@ export class Service {
     app.post('/api/projects/:id/agent/events', h(async (req, res) => {
       const s = this.session(req);
       const body = z.object({
-        type: z.enum(['change', 'decision', 'tool_result', 'scan', 'info', 'memory']),
+        type: z.enum(['change', 'decision', 'tool_result', 'scan', 'info']),
         endpoint: z.string().nullish(),
         tool: z.string().nullish(),
         severity: z.enum(['high', 'medium', 'low', 'info', 'unknown']).nullish(),
@@ -270,7 +226,7 @@ export class Service {
         data: z.record(z.unknown()).nullish(),
       }).parse(req.body ?? {});
       const doc = { _id: newId('age') as never, projectId: s.id, at: new Date(), ...body };
-      await this.store.col('agent_activity').insertOne(doc);
+      await this.store.col('agent_events').insertOne(doc);
       this.broadcast({ kind: 'agent', projectId: s.id, at: new Date().toISOString() });
       res.status(202);
       return { id: doc._id };
@@ -279,13 +235,13 @@ export class Service {
     app.get('/api/projects/:id/agent/events', h(async (req) => {
       const s = this.session(req);
       const limit = Math.min(500, Number(req.query.limit) || 200);
-      const rows = await this.store.col('agent_activity').find({ projectId: s.id }).sort({ at: -1 }).limit(limit).toArray();
+      const rows = await this.store.col('agent_events').find({ projectId: s.id }).sort({ at: -1 }).limit(limit).toArray();
       return rows.reverse(); // oldest-first for a readable log
     }));
 
     app.post('/api/projects/:id/agent/events/clear', h(async (req) => {
       const s = this.session(req);
-      const { deletedCount } = await this.store.col('agent_activity').deleteMany({ projectId: s.id });
+      const { deletedCount } = await this.store.col('agent_events').deleteMany({ projectId: s.id });
       this.broadcast({ kind: 'agent', projectId: s.id, at: new Date().toISOString() });
       return { deleted: deletedCount };
     }));
@@ -428,7 +384,6 @@ export class Service {
 
   async start() {
     await this.store.connect();
-    if (this.store.available) this.store.watchCollection('graph_findings', (e) => this.broadcast({ kind: 'findings', projectId: e.projectId, at: new Date().toISOString(), payload: { source: 'change-stream', op: e.op } }));
     const app = this.app();
     this.server = http.createServer(app);
     this.wss = new WebSocketServer({ noServer: true });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Entry point: start the local analysis service, optionally registering a project to monitor.
-//   workbench --project ./sample-app [--port 4317] [--no-monitor] [--mongo mongodb://127.0.0.1:27017]
+//   workbench --project ./sample-app [--port 4318] [--no-monitor] [--mongo mongodb://127.0.0.1:27017]
 import { parseArgs } from 'node:util';
 import { serviceConfig } from './config.js';
 import { Service } from './server.js';

@@ -1,6 +1,5 @@
 // One monitored workspace: watcher -> debounce/coalesce -> incremental analysis -> graph/findings,
 // plus explicit baseline capture and browser verification of immutable snapshots.
-import { DEFAULT_REVIEW } from './store/schemas.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -422,28 +421,6 @@ export class ProjectSession extends EventEmitter {
         { upsert: true, returnDocument: 'after', projection: { _id: 1 } },
       );
       if (doc) id = doc._id as unknown as string; // an earlier snapshot of this project may use the old id format
-
-      // NEW: one document per node / edge. _id = graphHash:id, so saving the same graph twice never duplicates.
-      //newId('gn') and newId('ge') are not used here, because we want to be able to query by graphHash and node/edge id.
-      const now = new Date();
-      if (graph.nodes.length) {
-        await this.store.col('graph_nodes').bulkWrite(graph.nodes.map((n) => ({
-          updateOne: {
-            filter: { _id: `${graphHash}:${n.id}` as never },
-            update: { $setOnInsert: { _id: `${graphHash}:${n.id}` as never, projectId: this.id, graphHash, graphId: id, nodeId: n.id, kind: n.kind, label: n.label, loc: n.loc ?? null, hash: n.hash ?? null, meta: n.meta ?? {}, createdAt: now } },
-            upsert: true,
-          },
-        })), { ordered: false });
-      }
-      if (graph.edges.length) {
-        await this.store.col('graph_edges').bulkWrite(graph.edges.map((e) => ({
-          updateOne: {
-            filter: { _id: `${graphHash}:${e.id}` as never },
-            update: { $setOnInsert: { _id: `${graphHash}:${e.id}` as never, projectId: this.id, graphHash, graphId: id, edgeId: e.id, source: e.source, target: e.target, kind: e.kind, certainty: e.certainty, confidence: e.confidence, derivation: e.derivation, loc: e.loc ?? null, createdAt: now } },
-            upsert: true,
-          },
-        })), { ordered: false });
-      }
     }, undefined);
     return id;
   }
@@ -496,7 +473,7 @@ export class ProjectSession extends EventEmitter {
       const { _id, ...rest } = d;
       await col.updateOne({ _id: _id as never }, {
         $set: { ...rest, projectId: this.id, status: 'open', lastSeenAt: now, lastSeenAnalysisRunId: ctx.analysisRunId ?? existing?.lastSeenAnalysisRunId ?? null, lastSeenBrowserRunId: ctx.browserRunId ?? existing?.lastSeenBrowserRunId ?? null, resolvedAt: null },
-        $setOnInsert: { firstSeenAt: now, firstSeenAnalysisRunId: ctx.analysisRunId ?? null, firstSeenBrowserRunId: ctx.browserRunId ?? null, review: { ...DEFAULT_REVIEW } },
+        $setOnInsert: { firstSeenAt: now, firstSeenAnalysisRunId: ctx.analysisRunId ?? null, firstSeenBrowserRunId: ctx.browserRunId ?? null },
       }, { upsert: true });
       if (!existing || existing.status === 'resolved') {
         await vr.insertOne({ _id: newId('ver') as never, projectId: this.id, findingId: d._id, action: existing ? 'reopened' : 'observed', at: now, analysisRunId: ctx.analysisRunId ?? null, browserRunId: ctx.browserRunId ?? null, result: d.classification, notes: d.title });

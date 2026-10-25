@@ -7,8 +7,8 @@ same MongoDB as the graph and show up in the dashboard's Security view.
 import time
 import requests
 
-HARNESS_HTTP = "http://127.0.0.1:4317"
-HARNESS_WS = "ws://127.0.0.1:4317/ws"
+HARNESS_HTTP = "http://127.0.0.1:4318"
+HARNESS_WS = "ws://127.0.0.1:4318/ws"
 
 DEPENDENCY_FILES = {"package.json", "package-lock.json", "npm-shrinkwrap.json"}
 
@@ -28,17 +28,50 @@ def status(project_id: str) -> dict:
     return requests.get(_url(project_id, "/status"), timeout=5).json()
 
 
-def changed_endpoints(project_id: str) -> list[dict]:
-    """Endpoint nodes whose source file is in the harness's most recent change set."""
+def graph_change(project_id: str) -> dict:
+    """Read the latest graph revision and identify endpoints changed or affected by it."""
     graph_res = requests.get(_url(project_id, "/graph"), timeout=5).json()
+    graph = graph_res.get("graph") or {}
+    nodes = graph.get("nodes") or []
+    endpoints = {n["id"]: n for n in nodes if n.get("kind") == "endpoint" and n.get("id")}
     changed_files = set(graph_res.get("lastChangedFiles") or [])
-    graph = graph_res.get("graph")
-    if not changed_files or not graph:
-        return []
+    last_diff = graph_res.get("lastDiff") or {}
+    impact = graph_res.get("lastImpact") or {}
+
+    affected_ids = set(impact.get("affectedEndpoints") or [])
+    changed_ids = set(last_diff.get("addedNodes") or []) | set(last_diff.get("changedNodes") or [])
+    selected_ids = affected_ids | (changed_ids & endpoints.keys())
+    selected_ids.update(
+        node_id for node_id, node in endpoints.items()
+        if node.get("loc", {}).get("file") in changed_files
+    )
+    current_endpoints = {}
+    for node_id, node in endpoints.items():
+        meta = node.get("meta") or {}
+        if meta.get("method") and meta.get("path"):
+            current_endpoints[node_id] = {
+                "id": node_id,
+                "method": meta["method"],
+                "path": meta["path"],
+            }
+
+    return {
+        "graphVersion": graph_res.get("graphVersion"),
+        "sourceHash": graph_res.get("sourceHash"),
+        "changedFiles": sorted(changed_files),
+        "endpoints": sorted(
+            (current_endpoints[node_id] for node_id in selected_ids if node_id in current_endpoints),
+            key=lambda e: (e["method"], e["path"], e["id"]),
+        ),
+        "_currentEndpoints": current_endpoints,
+    }
+
+
+def changed_endpoints(project_id: str) -> list[dict]:
+    """Compatibility helper for callers that only need endpoint method/path pairs."""
     return [
-        {"method": n["meta"]["method"], "path": n["meta"]["path"]}
-        for n in graph["nodes"]
-        if n.get("kind") == "endpoint" and n.get("loc", {}).get("file") in changed_files
+        {"method": e["method"], "path": e["path"]}
+        for e in graph_change(project_id)["endpoints"]
     ]
 
 
@@ -63,9 +96,23 @@ def ready_scanners(project_id: str) -> list[dict]:
 
 def run_dependency_scan(project_id: str, tools: list[str], timeout_s: int = 300) -> dict:
     """Start a scan restricted to `tools`, wait for it to finish, and return {run, observations}."""
-    res = requests.post(_url(project_id, "/security/dependency-scans"), json={"tools": tools, "trigger": "agent"}, timeout=10)
-    if res.status_code != 202:
-        raise RuntimeError(f"harness refused the scan (HTTP {res.status_code}): {res.text[:200]}")
+    while True:
+        res = requests.post(
+            _url(project_id, "/security/dependency-scans"),
+            json={"tools": tools, "trigger": "agent"},
+            timeout=10,
+        )
+        if res.status_code == 202:
+            break
+        if res.status_code != 409:
+            raise RuntimeError(f"harness refused the scan (HTTP {res.status_code}): {res.text[:200]}")
+        wait_deadline = time.monotonic() + timeout_s
+        while time.monotonic() < wait_deadline:
+            if not status(project_id).get("security", {}).get("dependencies", {}).get("job"):
+                break
+            time.sleep(3)
+        else:
+            raise RuntimeError(f"timed out waiting for the current dependency scan after {timeout_s}s")
     run_id = res.json()["runId"]
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:

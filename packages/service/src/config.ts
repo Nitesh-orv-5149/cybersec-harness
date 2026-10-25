@@ -262,7 +262,7 @@ export function serviceConfig(overrides: Partial<ServiceConfig> = {}): ServiceCo
   const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
   return {
     host: '127.0.0.1',
-    port: Number(process.env.WORKBENCH_PORT || 4317),
+    port: Number(process.env.WORKBENCH_PORT || 4318),
     mongoUri: process.env.WORKBENCH_MONGO_URI || 'mongodb://127.0.0.1:27017',
     mongoDb: process.env.WORKBENCH_MONGO_DB || 'workbench',
     dataDir: process.env.WORKBENCH_DATA_DIR || path.join(dataHome, 'workbench'),

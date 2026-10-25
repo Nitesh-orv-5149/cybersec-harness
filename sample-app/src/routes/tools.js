@@ -37,5 +37,18 @@ async function previewUrl(req, res) {
     res.status(502).json({ error: `could not fetch url: ${err.message}` });
   }
 }
+router.get('/parse', parseFilter);
+router.get('/lookup/:id', lookup);
 
+function parseFilter(req, res) {
+  // JSON.parse on a query parameter with no try/catch: any non-JSON value throws
+  const filter = JSON.parse(req.query.filter);
+  res.json({ keys: Object.keys(filter) });
+}
+
+function lookup(req, res) {
+  // null dereference: an unknown id makes this throw
+  const user = { 1: { name: 'a' }, 2: { name: 'b' } }[req.params.id];
+  res.json({ name: user.name.toUpperCase() });
+}
 export default router;

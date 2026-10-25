@@ -2,9 +2,9 @@
 // usage: node demo/regression.mjs <menu|currency|layout> <apply|revert>
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+
 const regressions = {
   menu: {
     file: 'public/js/nav.js',

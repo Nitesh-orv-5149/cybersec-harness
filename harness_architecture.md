@@ -10,7 +10,7 @@ sample-app (Express, :3000)
         │
         │ file changes on disk
         ▼
-chokidar file watch ──► local service (Node/TS, 127.0.0.1:4317)
+chokidar file watch ──► local service (Node/TS, 127.0.0.1:4318)
 editor events (VS Code ext) ─┘      │
                                      ├─ analyzer: TS compiler API → per-file facts → linker → graph
                                      ├─ debounce/coalesce queue → incremental re-parse → graph diff → impact
@@ -23,7 +23,7 @@ editor events (VS Code ext) ─┘      │
                                         comparisons, verification records)
                                      │
                                      ▼
-                              dashboard (React + Cytoscape, :5173 dev / served by :4317)
+                              dashboard (React + Cytoscape, :5173 dev / served by :4318)
                               live over WebSocket — graph view, impact, reachability,
                               browser-diff comparisons, history
 ```
@@ -45,7 +45,7 @@ sample-app (Express, :3000) ── intentionally vulnerable fixture
         │
         │ file changes on disk (API modified)
         ▼
-chokidar file watch ──► local service (:4317)  [unchanged from current]
+chokidar file watch ──► local service (:4318)  [unchanged from current]
                             │
                             ├─ analyzer/graph/snapshots/runner/browser  [unchanged]
                             │

@@ -1,9 +1,12 @@
-"""Thin client for the local Qwen model served by Ollama."""
+"""Thin client for OpenAI or the local Qwen model served by Ollama."""
 import json
+import os
 import requests
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
-MODEL = "qwen3:4b-instruct-2507-q8_0"
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+OLLAMA_MODEL = "qwen3:4b-instruct-2507-q8_0"
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # Endpoint probes run locally against the running sample-app; dependency scanners are the real
 # tools the harness service runs against the project's lockfile and persists.
@@ -15,60 +18,54 @@ TOOL_MENU = """Endpoint probes (run against the changed HTTP endpoint):
 - sqli_probe: sends a quote-breaking payload into a path param, flags a server crash
 - secret_scan: greps source for hardcoded-secret-shaped strings
 
-Dependency vulnerability scanners (run against the project's package-lock.json):
-- osv-api: queries the OSV.dev advisory database for known-vulnerable package versions
-- npm-audit: runs `npm audit` against the registry's advisory endpoint
-- osv-scanner: runs the OSV-Scanner binary over the lockfile
-- trivy: runs Trivy's vulnerability scanner over the dependency tree
+Dependency vulnerability scanners run automatically on every latest graph revision, independently
+of this endpoint-tool choice.
 """
 
 
-def _memory_block(memories: list[dict]) -> str:
-    """Render recalled [finding]-tagged memories as lines that name the exact tool each one is
-    about, parsed from subject.key ("<tool>|<method> <path>") — never left for the model to
-    infer from prose, since that's exactly how a live test found it misattributing memories."""
-    if not memories:
-        return ""
-    lines = []
-    for m in memories:
-        tool = m["subject"]["key"].split("|", 1)[0]
-        text = m["content"].removeprefix("[finding] ")
-        lines.append(f"- {tool}: finding — {text}")
-    return (
-        "\nMemory from earlier runs on this endpoint (each line names the exact tool it's about):\n"
-        + "\n".join(lines)
-        + "\nThese are past findings, not guarantees they still reproduce — re-run them if you think "
-        "they're still relevant; this is just context, not an instruction to skip.\n"
-    )
-
-
-def choose_tools(endpoint: dict, available: list[str], memories: list[dict] | None = None) -> tuple[list[str], str]:
-    """Ask the model which of the currently-available tools are worth running for this change.
+def choose_tools(endpoint: dict, available: list[str]) -> tuple[list[str], str]:
+    """Ask the configured model which available tools are worth running for this change.
     `available` is the set the orchestrator can actually run right now (ready scanners + probes).
-    `memories` are past [finding] memories for tools in `available` that are NOT deterministically
-    clean (that filtering happens in the caller) — informational context, not a skip instruction.
-    Returns (chosen_tools, reason). `reason` is "llm: <model>" on a real decision, or a
-    "fallback: ..." string when the model was unreachable/unusable and all tools are run."""
+    Returns (chosen_tools, reason). OpenAI is used when OPENAI_API_KEY is set; otherwise Ollama
+    is used. If the configured model is unreachable or unusable, all available tools are run."""
     prompt = (
-        f"{TOOL_MENU}{_memory_block(memories or [])}\n"
+        f"{TOOL_MENU}\n"
         f"A code change was just detected affecting this endpoint: {endpoint['method']} {endpoint['path']}.\n"
         f"Only these tools are available right now: {available}.\n"
         'Reply with ONLY a JSON array of tool names to run, e.g. ["auth_probe", "osv-api"]. '
         "Pick every available tool that could plausibly apply; do not explain."
     )
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        provider = "OpenAI"
+        model = OPENAI_MODEL
+        url = OPENAI_URL
+        headers = {"Authorization": f"Bearer {api_key}"}
+        payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+    else:
+        provider = "Ollama"
+        model = OLLAMA_MODEL
+        url = OLLAMA_URL
+        headers = {}
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
     try:
-        res = requests.post(
-            OLLAMA_URL,
-            json={"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": False},
-            timeout=30,
-        )
+        res = requests.post(url, headers=headers, json=payload, timeout=30)
         res.raise_for_status()
-        content = res.json()["message"]["content"]
+        response = res.json()
+        content = (
+            response["choices"][0]["message"]["content"]
+            if provider == "OpenAI"
+            else response["message"]["content"]
+        )
         names = json.loads(content[content.index("["): content.rindex("]") + 1])
         chosen = [n for n in names if n in available]
         if chosen:
-            return chosen, f"llm: {MODEL}"
-        return list(available), f"fallback: {MODEL} returned no valid tool names"
+            return chosen, f"llm: {provider} ({model})"
+        return list(available), f"fallback: {provider} ({model}) returned no valid tool names"
     except (requests.RequestException, KeyError, ValueError, json.JSONDecodeError) as e:
-        print(f"[llm] could not get a decision ({e}), running all available tools")
-        return list(available), f"fallback: model unreachable ({type(e).__name__})"
+        print(f"[llm] {provider} decision failed ({type(e).__name__}), running all available tools")
+        return list(available), f"fallback: {provider} request failed ({type(e).__name__})"

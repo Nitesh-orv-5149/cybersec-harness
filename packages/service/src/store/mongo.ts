@@ -1,8 +1,6 @@
 // MongoDB persistence. All history lives here; the service keeps only the *current* live graph in memory.
 import { MongoClient, type Collection, type Db, type Document } from 'mongodb';
 import { log } from '../log.js';
-import { REQUIREMENT_JSON_SCHEMA } from './schemas.js';
-import { ensureAgentMemory, safeIndex } from './agentMemory.js';
 
 export class StoreUnavailableError extends Error {
   constructor(msg = 'MongoDB is unavailable') { super(msg); this.name = 'StoreUnavailableError'; }
@@ -11,9 +9,7 @@ export class StoreUnavailableError extends Error {
 export const COLLECTIONS = [
   'projects', 'file_events', 'source_snapshots', 'graph_snapshots', 'analysis_runs',
   'graph_findings', 'browser_runs', 'browser_results', 'comparisons', 'verification_records',
-  'security_scan_runs', 'security_observations', 'agent_activity',
-  'agent_requirements', 'agent_runs', 'agent_events', 'agent_memories', 'graph_nodes', 'graph_edges',
-  'web_endpoints', 'web_scan_cache',
+  'security_scan_runs', 'security_observations', 'agent_events', 'web_endpoints', 'web_scan_cache',
 ] as const;
 export type CollectionName = (typeof COLLECTIONS)[number];
 
@@ -33,7 +29,7 @@ export class Store {
       await this.client.connect();
       this.db = this.client.db(this.dbName);
       await this.db.command({ ping: 1 });
-      await this.ensureIndexes();      
+      await this.ensureIndexes();
       this.setAvailable(true, null);
       this.client.on('serverHeartbeatFailed', () => this.setAvailable(false, 'heartbeat failed'));
       this.client.on('serverHeartbeatSucceeded', () => { if (!this.available) this.setAvailable(true, null); });
@@ -77,76 +73,41 @@ export class Store {
     return this.db.collection<T>(name);
   }
 
-    /** Create agent_requirements with a database-level $jsonSchema validator. */
-  private async ensureValidatedCollections() {
-    const db = this.db!;
-    const validator = { $jsonSchema: REQUIREMENT_JSON_SCHEMA as unknown as Document };
-    try {
-      const exists = (await db.listCollections({ name: 'agent_requirements' }).toArray()).length > 0;
-      if (exists) await db.command({ collMod: 'agent_requirements', validator, validationLevel: 'strict', validationAction: 'error' });
-      else await db.createCollection('agent_requirements', { validator, validationLevel: 'strict', validationAction: 'error' });
-    } catch (e) {
-      log.warn(`could not apply MongoDB schema validator to agent_requirements: ${String((e as Error).message ?? e)}`);
-    }
-  }
-
-  /** Change stream: fires on every change in a collection. */
-  watchCollection(name: CollectionName, onChange: (e: { op: string; projectId?: string }) => void) {
-    try {
-      const stream = this.col(name).watch([], { fullDocument: 'updateLookup' });
-      stream.on('change', (c) => onChange({ op: c.operationType, projectId: (c as { fullDocument?: { projectId?: string } }).fullDocument?.projectId }));
-      stream.on('error', (e) => log.warn(`change stream on ${name} stopped: ${String(e)}`));
-      return stream;
-    } catch (e) {
-      log.warn(`change stream on ${name} unavailable: ${String(e)}`);
-      return null;
-    }
-  }
-
   private async ensureIndexes() {
     const db = this.db!;
-    await ensureAgentMemory(db);
-    await this.ensureValidatedCollections();
-    await safeIndex(db, 'agent_requirements', { projectId: 1, status: 1, priority: 1 });
     await Promise.all([
-      safeIndex(db, 'projects', { root: 1 }, { unique: true }),
-      safeIndex(db, 'file_events', { projectId: 1, dedupeKey: 1 }, { unique: true }),
-      safeIndex(db, 'file_events', { projectId: 1, receivedAt: -1 }),
-      safeIndex(db, 'file_events', { projectId: 1, status: 1 }),
-      safeIndex(db, 'source_snapshots', { projectId: 1, contentHash: 1 }, { unique: true }),
-      safeIndex(db, 'source_snapshots', { projectId: 1, createdAt: -1 }),
-      safeIndex(db, 'graph_snapshots', { projectId: 1, graphHash: 1 }, { unique: true }),
-      safeIndex(db, 'analysis_runs', { projectId: 1, startedAt: -1 }),
-      safeIndex(db, 'graph_findings', { projectId: 1, status: 1, severityRank: -1 }),
-      safeIndex(db, 'graph_findings', { projectId: 1, lastSeenAt: -1 }),
-      safeIndex(db, 'browser_runs', { projectId: 1, startedAt: -1 }),
-      safeIndex(db, 'browser_results', { browserRunId: 1, side: 1, scenarioId: 1, viewport: 1 }, { unique: true }),
-      safeIndex(db, 'browser_results', { projectId: 1, scenarioId: 1, createdAt: -1 }),
-      safeIndex(db, 'comparisons', { projectId: 1, createdAt: -1 }),
-      safeIndex(db, 'comparisons', { browserRunId: 1 }, { unique: true }),
-      safeIndex(db, 'verification_records', { projectId: 1, findingId: 1, at: -1 }),
-      safeIndex(db, 'graph_nodes', { projectId: 1, graphHash: 1, kind: 1 }),
-      safeIndex(db, 'graph_nodes', { projectId: 1, nodeId: 1 }),
-      safeIndex(db, 'graph_edges', { projectId: 1, graphHash: 1, kind: 1 }),
-      safeIndex(db, 'graph_edges', { projectId: 1, graphHash: 1, source: 1 }),
-      safeIndex(db, 'graph_edges', { projectId: 1, graphHash: 1, target: 1 }),
-      safeIndex(db, 'graph_findings', { projectId: 1, source: 1, 'pkg.name': 1, 'pkg.version': 1 }),
-      safeIndex(db, 'graph_findings', { projectId: 1, ids: 1 }),
-      safeIndex(db, 'security_scan_runs', { projectId: 1, category: 1, startedAt: -1 }),
-      safeIndex(db, 'security_scan_runs', { projectId: 1, status: 1 }),
-      safeIndex(db, 'security_observations', { projectId: 1, findingId: 1, observedAt: -1 }),
-      safeIndex(db, 'security_observations', { runId: 1, tool: 1 }),
-      safeIndex(db, 'security_observations', { projectId: 1, 'package.name': 1, advisoryId: 1 }),
-      safeIndex(db, 'agent_activity', { projectId: 1, at: -1 }),
-      safeIndex(db, 'agent_events', { projectId: 1, at: -1 }),
-      safeIndex(db, 'security_observations', { runId: 1, side: 1 }),
-      safeIndex(db, 'graph_findings', { projectId: 1, source: 1, 'web.scopeKey': 1, status: 1 }),
+      db.collection('projects').createIndex({ root: 1 }, { unique: true }),
+      db.collection('file_events').createIndex({ projectId: 1, dedupeKey: 1 }, { unique: true }),
+      db.collection('file_events').createIndex({ projectId: 1, receivedAt: -1 }),
+      db.collection('file_events').createIndex({ projectId: 1, status: 1 }),
+      db.collection('source_snapshots').createIndex({ projectId: 1, contentHash: 1 }, { unique: true }),
+      db.collection('source_snapshots').createIndex({ projectId: 1, createdAt: -1 }),
+      db.collection('graph_snapshots').createIndex({ projectId: 1, graphHash: 1 }, { unique: true }),
+      db.collection('analysis_runs').createIndex({ projectId: 1, startedAt: -1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, status: 1, severityRank: -1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, lastSeenAt: -1 }),
+      db.collection('browser_runs').createIndex({ projectId: 1, startedAt: -1 }),
+      db.collection('browser_results').createIndex({ browserRunId: 1, side: 1, scenarioId: 1, viewport: 1 }, { unique: true }),
+      db.collection('browser_results').createIndex({ projectId: 1, scenarioId: 1, createdAt: -1 }),
+      db.collection('comparisons').createIndex({ projectId: 1, createdAt: -1 }),
+      db.collection('comparisons').createIndex({ browserRunId: 1 }, { unique: true }),
+      db.collection('verification_records').createIndex({ projectId: 1, findingId: 1, at: -1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, source: 1, 'pkg.name': 1, 'pkg.version': 1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, ids: 1 }),
+      db.collection('security_scan_runs').createIndex({ projectId: 1, category: 1, startedAt: -1 }),
+      db.collection('security_scan_runs').createIndex({ projectId: 1, status: 1 }),
+      db.collection('security_observations').createIndex({ projectId: 1, findingId: 1, observedAt: -1 }),
+      db.collection('security_observations').createIndex({ runId: 1, tool: 1 }),
+      db.collection('security_observations').createIndex({ projectId: 1, 'package.name': 1, advisoryId: 1 }),
+      db.collection('agent_events').createIndex({ projectId: 1, at: -1 }),
+      db.collection('security_observations').createIndex({ runId: 1, side: 1 }),
+      db.collection('graph_findings').createIndex({ projectId: 1, source: 1, 'web.scopeKey': 1, status: 1 }),
       // Incremental web scanning (security/web/incremental.ts). _id is a hash of (project, scope, input), so a point
       // lookup is by _id; a scan loads a whole scope with one indexed query. The TTL index drops cache buckets whose
       // newest entry has expired (e.g. a route that was removed); lookups still check each entry's own expiry.
-      safeIndex(db, 'web_endpoints', { projectId: 1, scope: 1, kind: 1 }),
-      safeIndex(db, 'web_scan_cache', { projectId: 1, scope: 1 }),
-      safeIndex(db, 'web_scan_cache', { expiresAt: 1 }, { expireAfterSeconds: 0 }),
+      db.collection('web_endpoints').createIndex({ projectId: 1, scope: 1, kind: 1 }),
+      db.collection('web_scan_cache').createIndex({ projectId: 1, scope: 1 }),
+      db.collection('web_scan_cache').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     ]);
   }
 
