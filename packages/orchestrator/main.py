@@ -103,9 +103,15 @@ def investigate(project_id: str, endpoint: dict, available: list[str], run_deps:
                               data={"status": "clean", "tools": dep_tools})
         new = 0
         for f in findings:
-            if memory.already_found(f["tool"], f["evidence"].get("advisoryId")):
-                continue
-            saved = memory.insert_one({**f, "endpoint": f["evidence"].get("advisoryId")})
+            # Open vulnerabilities get re-reported every batch they're still present in — the
+            # old dummy store's permanent dedup silently hid a finding after its first sighting,
+            # which is the actual bug, not a behavior to preserve. This memory is for
+            # traceability, not suppression: there is no "[clean]" counterpart for dependency
+            # findings (a clean scan is already reported via the harness.log_event path below).
+            key = f"{f['tool']}|{f['evidence'].get('advisoryId')}"
+            saved = {**f, "endpoint": f["evidence"].get("advisoryId")}
+            agent_memory.remember(project_id, run["_id"], "package", key, "finding", saved["summary"],
+                                  evidence=[{"kind": "scan_run", "id": f["evidence"].get("runId") or ""}])
             new += 1
             print(f"[{saved['tool']}] FINDING: {saved['summary']} (severity={saved.get('severity')})")
             harness.log_event(project_id, "tool_result", f"{saved['tool']}: {saved['summary']}",
