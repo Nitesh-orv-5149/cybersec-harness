@@ -23,13 +23,34 @@ Dependency vulnerability scanners (run against the project's package-lock.json):
 """
 
 
-def choose_tools(endpoint: dict, available: list[str]) -> tuple[list[str], str]:
+def _memory_block(memories: list[dict]) -> str:
+    """Render recalled [finding]-tagged memories as lines that name the exact tool each one is
+    about, parsed from subject.key ("<tool>|<method> <path>") — never left for the model to
+    infer from prose, since that's exactly how a live test found it misattributing memories."""
+    if not memories:
+        return ""
+    lines = []
+    for m in memories:
+        tool = m["subject"]["key"].split("|", 1)[0]
+        text = m["content"].removeprefix("[finding] ")
+        lines.append(f"- {tool}: finding — {text}")
+    return (
+        "\nMemory from earlier runs on this endpoint (each line names the exact tool it's about):\n"
+        + "\n".join(lines)
+        + "\nThese are past findings, not guarantees they still reproduce — re-run them if you think "
+        "they're still relevant; this is just context, not an instruction to skip.\n"
+    )
+
+
+def choose_tools(endpoint: dict, available: list[str], memories: list[dict] | None = None) -> tuple[list[str], str]:
     """Ask the model which of the currently-available tools are worth running for this change.
     `available` is the set the orchestrator can actually run right now (ready scanners + probes).
+    `memories` are past [finding] memories for tools in `available` that are NOT deterministically
+    clean (that filtering happens in the caller) — informational context, not a skip instruction.
     Returns (chosen_tools, reason). `reason` is "llm: <model>" on a real decision, or a
     "fallback: ..." string when the model was unreachable/unusable and all tools are run."""
     prompt = (
-        f"{TOOL_MENU}\n"
+        f"{TOOL_MENU}{_memory_block(memories or [])}\n"
         f"A code change was just detected affecting this endpoint: {endpoint['method']} {endpoint['path']}.\n"
         f"Only these tools are available right now: {available}.\n"
         'Reply with ONLY a JSON array of tool names to run, e.g. ["auth_probe", "osv-api"]. '
