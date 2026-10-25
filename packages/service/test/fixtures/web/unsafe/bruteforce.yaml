@@ -1,0 +1,16 @@
+id: unsafe-payloads
+info:
+  name: Login spray
+  severity: high
+  tags: exposure
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/login?u={{user}}&p={{pass}}"
+    attack: clusterbomb
+    payloads:
+      user: [admin, root]
+      pass: [admin, password]
+    matchers:
+      - type: status
+        status: [200]

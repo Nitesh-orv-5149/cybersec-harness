@@ -468,3 +468,13 @@ describe('OSV.dev web API adapter', () => {
     expect(res.reports[0]!.tool).toBe('osv-api');
   });
 });
+
+describe('execTool cancellation', () => {
+  it('stops a process whose signal was aborted before it started', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const r = await execTool(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { cwd: os.tmpdir(), timeoutMs: 30_000, maxOutputBytes: 1024, signal: ac.signal });
+    expect(r.cancelled).toBe(true);
+    expect(r.durationMs).toBeLessThan(5000);
+  });
+});

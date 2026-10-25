@@ -1,0 +1,29 @@
+id: workbench-canary-header
+
+info:
+  name: Workbench test canary header
+  author: workbench
+  severity: medium
+  description: Test-only template. Matches the canary header that the disposable test server sets.
+  tags: workbench-test,misconfig
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/canary"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "X-Workbench-Canary: exposed"
+      - type: status
+        status:
+          - 200
+    extractors:
+      - type: regex
+        name: canary-version
+        part: body
+        group: 1
+        regex:
+          - 'canary-version=([0-9.]+)'

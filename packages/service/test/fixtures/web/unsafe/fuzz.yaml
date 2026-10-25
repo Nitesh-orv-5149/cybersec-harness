@@ -1,0 +1,15 @@
+id: unsafe-fuzz
+info:
+  name: Fuzz
+  severity: medium
+  tags: misconfig
+http:
+  - pre-condition:
+      - type: dsl
+        dsl:
+          - 'method == "GET"'
+    fuzzing:
+      - part: query
+        type: postfix
+        fuzz:
+          - "'"

@@ -1,0 +1,101 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Derived from the workbench code graph",
+    "version": "1"
+  },
+  "paths": {
+    "/api/items/{id}": {
+      "get": {
+        "operationId": "get_api_items_id",
+        "summary": "GET /api/items/:id (from code graph)",
+        "x-workbench-endpoint": "ep:GET /api/items/:id",
+        "x-workbench-source": "src/routes/items.js:7",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "examples": {
+              "singleQuote": {
+                "value": "'"
+              },
+              "doubleQuote": {
+                "value": "\""
+              },
+              "zero": {
+                "value": "0"
+              },
+              "negative": {
+                "value": "-1"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Not described: derived from code, no response contract is known."
+          }
+        }
+      }
+    },
+    "/api/items/search": {
+      "get": {
+        "operationId": "get_api_items_search",
+        "summary": "GET /api/items/search (from code graph)",
+        "x-workbench-endpoint": "ep:GET /api/items/search",
+        "x-workbench-source": "src/routes/items.js:6",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "examples": {
+              "empty": {
+                "value": ""
+              },
+              "singleQuote": {
+                "value": "'"
+              },
+              "doubleQuote": {
+                "value": "\""
+              },
+              "zero": {
+                "value": "0"
+              },
+              "negative": {
+                "value": "-1"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Not described: derived from code, no response contract is known."
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "get_health",
+        "summary": "GET /health (from code graph)",
+        "x-workbench-endpoint": "ep:GET /health",
+        "x-workbench-source": "src/server.js:5",
+        "parameters": [],
+        "responses": {
+          "default": {
+            "description": "Not described: derived from code, no response contract is known."
+          }
+        }
+      }
+    }
+  }
+}

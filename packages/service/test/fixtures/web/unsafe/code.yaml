@@ -1,0 +1,9 @@
+id: unsafe-code
+info:
+  name: Runs code
+  severity: info
+  tags: misconfig
+code:
+  - engine:
+      - sh
+    source: id

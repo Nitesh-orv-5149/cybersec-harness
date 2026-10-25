@@ -64,7 +64,10 @@ describe.runIf(process.env.CI !== 'skip-mongo')('project session with MongoDB', 
     fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('export function formatCurrency(cents) {', "export function formatCurrency(cents) {\n  if (cents == null) return '';"));
     expect(await waitFor(() => session.live!.graphVersion > v)).toBe(true);
     expect(session.live!.lastDiff!.changedNodes).toEqual(['fn:src/lib/format.js#formatCurrency']);
-    expect(session.live!.lastImpact!.affectedEndpoints.length).toBe(4);
+    // formatCurrency <- toView <- orderService.fetch/list <- every order route (including /export and /cancel)
+    expect([...session.live!.lastImpact!.affectedEndpoints].sort()).toEqual([
+      'ep:GET /api/orders', 'ep:GET /api/orders/:id', 'ep:GET /api/orders/:id/cancel', 'ep:GET /api/orders/:id/export', 'ep:GET /api/orders/:id/receipt', 'ep:POST /api/orders',
+    ]);
     const events = await store.col('file_events').find({ projectId: session.id, path: 'src/lib/format.js' }).toArray();
     expect(events.length).toBe(1);
     expect(events[0].status).toBe('analyzed');

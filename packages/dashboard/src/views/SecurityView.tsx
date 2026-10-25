@@ -114,6 +114,8 @@ export function SecurityView({ ctx }: { ctx: Ctx }) {
           </div>
         )}
 
+        <p className="small muted" style={{ padding: '0 20px' }}>Website vulnerability scanning (Nuclei) is under <b>Security tools → Web scanning</b> and <b>Website comparison → Security changes</b>.</p>
+
         {storeUp && runs && runs.length > 0 && (
           <div className="section">
             <h3>Scan history</h3>

@@ -7,7 +7,7 @@ import type { FileFacts, Graph, LanguageAdapter } from './types.js';
 import { shortHash } from '../util.js';
 
 export const ADAPTERS: LanguageAdapter[] = [jsAdapter];
-export const PARSER_VERSION = 'js-ts-express@1';
+export const PARSER_VERSION = 'js-ts-express@2';
 
 export interface AnalyzerOptions {
   root: string;

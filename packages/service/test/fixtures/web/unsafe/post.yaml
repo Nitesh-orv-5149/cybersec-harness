@@ -1,0 +1,13 @@
+id: unsafe-post
+info:
+  name: Writes data
+  severity: low
+  tags: misconfig
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/api/orders"
+    body: '{"item":"x"}'
+    matchers:
+      - type: status
+        status: [201]

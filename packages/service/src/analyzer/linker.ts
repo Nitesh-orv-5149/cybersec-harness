@@ -1,7 +1,7 @@
 // Language-agnostic linker: turns per-file facts into a typed dependency graph.
 // It never invents relationships: an edge exists only when a reference resolves to a known declaration.
 import path from 'node:path';
-import type { EdgeKind, FileFacts, Graph, GraphEdge, GraphNode, SinkKind } from './types.js';
+import { RETURNED_SUFFIX, type EdgeKind, type FileFacts, type Graph, type GraphEdge, type GraphNode, type SinkKind } from './types.js';
 import { AUTH_HINT } from './js-adapter.js';
 
 export const SINK_LABELS: Record<SinkKind, string> = {
@@ -124,7 +124,7 @@ export function link(all: FileFacts[], provider: string, unsavedFiles: Set<strin
       addNode({
         id,
         kind: d.kind === 'test' ? 'test' : isDb ? 'database' : 'function',
-        label: d.kind === 'test' ? d.qname : d.kind === 'handler' ? d.qname.replace(/^route /, 'handler ') : `${d.qname}()`,
+        label: d.kind === 'test' ? d.qname : d.kind === 'handler' ? d.qname.replace(/^route /, 'handler ') : d.qname.endsWith(RETURNED_SUFFIX) ? `handler returned by ${d.qname.slice(0, -RETURNED_SUFFIX.length)}()` : `${d.qname}()`,
         loc: { file: f.file, line: d.line, endLine: d.endLine },
         hash: d.hash,
         fromUnsavedBuffer: unsavedFiles.has(f.file) || undefined,
@@ -177,6 +177,13 @@ export function link(all: FileFacts[], provider: string, unsavedFiles: Set<strin
         if (r.handler?.kind === 'inline') handlerId = declId(f.file, r.handler.qname);
         else if (r.handler?.kind === 'ident') handlerId = resolveIdent(f.file, r.handler.name);
         else if (r.handler?.kind === 'member') handlerId = resolveMember(f.file, r.handler.object, r.handler.prop);
+        else if (r.handler?.kind === 'factory') {
+          const ref = r.handler.ref;
+          const factoryId = ref.kind === 'ident' ? resolveIdent(f.file, ref.name) : resolveMember(f.file, ref.object, ref.prop);
+          const fm = factoryId ? /^fn:(.+)#(.+)$/.exec(factoryId) : null;
+          // the function the factory returns, when the analyzer saw one; otherwise the factory itself
+          handlerId = fm && hasDecl(fm[1]!, `${fm[2]}${RETURNED_SUFFIX}`) ? declId(fm[1]!, `${fm[2]}${RETURNED_SUFFIX}`) : factoryId;
+        }
         if (handlerId) {
           // request inputs the handler reads directly (used to describe the endpoint, e.g. for API schema generation)
           const hm = /^fn:(.+)#(.+)$/.exec(handlerId);

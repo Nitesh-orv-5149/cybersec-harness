@@ -43,6 +43,6 @@ export class OutputBuffer {
 export function redact(s: string): string {
   return s
     .replace(/(https?:\/\/)([^:@/\s]+):([^@/\s]+)@/g, '$1$2:***@')
-    .replace(/\b(token|secret|password|passwd|api[_-]?key|authorization)=([^&\s]+)/gi, '$1=***')
+    .replace(/\b(token|secret|password|passwd|api[_-]?key|authorization)=([^&\s'"]+)/gi, '$1=***')
     .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/-]+=*/g, '$1 ***');
 }

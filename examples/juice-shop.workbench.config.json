@@ -1,0 +1,26 @@
+{
+  "snapshot": {
+    "exclude": [".git", ".angular", "frontend/src", "test", "screenshots", "monitoring", "vagrant", "rsn", "logs", "coverage", ".nyc_output", "cypress"],
+    "maxFiles": 15000,
+    "maxBytes": 400000000
+  },
+  "run": {
+    "build": "npm run build:server",
+    "start": "node build/app",
+    "portEnv": "PORT",
+    "healthPath": "/rest/admin/application-version",
+    "buildTimeoutMs": 300000,
+    "startTimeoutMs": 180000
+  },
+  "security": {
+    "api": {
+      "allowActiveTesting": true,
+      "methods": ["GET", "POST"],
+      "checks": ["not_a_server_error"],
+      "maxExamples": 20,
+      "rateLimit": "20/s",
+      "timeoutMs": 1200000
+    },
+    "iac": { "exclude": ["node_modules", ".git", "build", "coverage", ".terraform", "frontend"] }
+  }
+}

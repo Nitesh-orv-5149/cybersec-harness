@@ -27,8 +27,15 @@ function readUpload(req, res) {
 }
 
 async function previewUrl(req, res) {
-  const upstream = await fetch(String(req.query.url));
-  res.send(await upstream.text());
+  // Still fetches any caller-supplied URL (the SSRF this fixture demonstrates), but a missing or unreachable URL is
+  // answered instead of crashing the whole server with an unhandled rejection.
+  if (typeof req.query.url !== 'string' || !/^https?:\/\//i.test(req.query.url)) return res.status(400).json({ error: 'url query parameter (http or https) is required' });
+  try {
+    const upstream = await fetch(req.query.url);
+    res.send(await upstream.text());
+  } catch (err) {
+    res.status(502).json({ error: `could not fetch url: ${err.message}` });
+  }
 }
 
 export default router;

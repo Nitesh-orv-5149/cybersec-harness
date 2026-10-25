@@ -1,0 +1,14 @@
+id: unsafe-intrusive
+info:
+  name: Tagged intrusive
+  severity: info
+  tags:
+    - exposure
+    - intrusive
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    matchers:
+      - type: status
+        status: [200]
