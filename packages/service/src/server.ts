@@ -217,7 +217,7 @@ export class Service {
     app.post('/api/projects/:id/agent/events', h(async (req, res) => {
       const s = this.session(req);
       const body = z.object({
-        type: z.enum(['change', 'decision', 'tool_result', 'scan', 'info']),
+        type: z.enum(['change', 'decision', 'tool_result', 'scan', 'info', 'memory']),
         endpoint: z.string().nullish(),
         tool: z.string().nullish(),
         severity: z.enum(['high', 'medium', 'low', 'info', 'unknown']).nullish(),

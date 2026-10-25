@@ -38,12 +38,14 @@ def investigate(project_id: str, endpoint: dict, available: list[str], run_deps:
     # re-asked about — this is a code-level gate, not something left to the LLM's judgment (a
     # live test found the LLM does not reliably map a memory's prose back to the right tool).
     candidate_probe_tools = []
+    skipped_clean = []
     for name in sorted(ENDPOINT_TOOLS & set(available)):
         key = f"{name}|{ep}"
         if agent_memory.already_clean(project_id, "endpoint", key):
             print(f"[{name}] already clean for {ep} (memory), skipping")
+            skipped_clean.append(name)
             harness.log_event(project_id, "tool_result", f"{name}: skipped (memory: already clean)",
-                              endpoint=ep, tool=name, data={"status": "skipped"})
+                              endpoint=ep, tool=name, data={"status": "skipped", "reason": "cached [clean] verdict"})
         else:
             candidate_probe_tools.append(name)
     available = [t for t in available if t not in (ENDPOINT_TOOLS - set(candidate_probe_tools))]
@@ -53,6 +55,28 @@ def investigate(project_id: str, endpoint: dict, available: list[str], run_deps:
     for name in candidate_probe_tools:
         memories += [m for m in agent_memory.recall(project_id, "endpoint", f"{name}|{ep}") if m["content"].startswith("[finding]")]
     agent_memory.log_step(project_id, run["_id"], "memory_read", outputSummary=f"{len(memories)} finding memory(ies) recalled")
+
+    # Log memory access to the activity feed so the dashboard Agent tab shows it alongside tool calls
+    mem_parts = []
+    if memories:
+        mem_parts.append(f"{len(memories)} past finding(s) recalled")
+    if skipped_clean:
+        mem_parts.append(f"{', '.join(skipped_clean)} pruned (already clean)")
+    mem_title = " · ".join(mem_parts) if mem_parts else "checked prior observations (cold query)"
+    harness.log_event(
+        project_id,
+        "memory",
+        f"memory: {mem_title}",
+        endpoint=ep,
+        tool="memory",
+        data={
+            "action": "recall",
+            "status": "hit" if (memories or skipped_clean) else "cold",
+            "recalled": memories,
+            "skippedClean": skipped_clean,
+            "candidates": candidate_probe_tools,
+        },
+    )
 
     chosen, reason = llm.choose_tools(endpoint, available, memories)
     print(f"[llm] chose tools: {chosen} ({reason})")
@@ -69,7 +93,8 @@ def investigate(project_id: str, endpoint: dict, available: list[str], run_deps:
             agent_memory.remember(project_id, run["_id"], "endpoint", key, "clean", "ran, nothing found", ttl_hours=24 * 7)
             agent_memory.log_step(project_id, run["_id"], "tool_call", tool=name, status="ok", outputSummary="clean")
             harness.log_event(project_id, "tool_result", f"{name}: nothing found",
-                              endpoint=ep, tool=name, data={"status": "clean"})
+                              endpoint=ep, tool=name,
+                              data={"status": "clean", "memory": {"verdict": "clean", "ttl": "7d", "key": key}})
             continue
         agent_memory.remember(project_id, run["_id"], "endpoint", key, "finding", result["summary"],
                                confidence="medium", evidence=[{"kind": "event", "id": run["_id"]}])
@@ -77,7 +102,7 @@ def investigate(project_id: str, endpoint: dict, available: list[str], run_deps:
         print(f"[{name}] FINDING: {result['summary']} (severity={result.get('severity')})")
         harness.log_event(project_id, "tool_result", f"{name}: {result['summary']}",
                           endpoint=ep, tool=name, severity=result.get("severity"),
-                          data={"status": "finding", **result})
+                          data={"status": "finding", "memory": {"verdict": "finding", "confidence": "medium", "key": key}, **result})
 
     agent_memory.finish_run(project_id, run["_id"], "completed", summary=f"ran {chosen}")
 
