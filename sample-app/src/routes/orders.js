@@ -27,6 +27,12 @@ router.get('/orders/:id/cancel', (req, res) => {
   res.json({ cancelled: true, order });
 });
 
+router.get('/orders/:id/summary', (req, res) => {
+  const order = orderService.fetch(req.params.id);
+  if (!order) return res.status(404).json({ error: 'not found' });
+  res.json({ id: order.id, total: order.total });
+});
+
 function listOrders(req, res) {
   res.json(orderService.list());
 }
